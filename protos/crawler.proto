@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package crawler;
+
+service CrawlerService {
+  rpc Crawl (CrawlRequest) returns (CrawlResponse);
+}
+
+message CrawlRequest {
+  string seed_url = 1;
+  int32 max_pages = 2;
+  int32 max_depth = 3;
+}
+
+message CrawlResponse {
+  int32 pages_crawled = 1;
+  string status = 2;
+}

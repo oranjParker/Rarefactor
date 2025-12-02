@@ -1,0 +1,38 @@
+# --- Virtual Environments ---
+# uv creates .venv by default
+.venv/
+venv/
+env/
+
+# --- Database (CRITICAL) ---
+# Never commit the local production data
+*.db
+*.sqlite
+*.sqlite3
+rarefactor.db
+
+# --- Logs & Debugging ---
+*.log
+npm-debug.log*
+
+# --- IDEs & OS (The "Clean Repo" rules) ---
+# macOS
+.DS_Store
+# VS Code
+.vscode/
+# PyCharm / IntelliJ
+.idea/
+
+# --- Protobuf / gRPC ---
+# NOTE: We generally want to COMMIT the generated code for a demo repo
+# so the reviewer doesn't need 'buf' installed to run it.
+# If you preferred a strict "source-only" repo, you would uncomment the line below:
+/generated/*
+# --- Testing & Types ---
+.mypy_cache/
+.pytest_cache/
+
+# --- Docker ---
+# Ignore overrides that might contain local secrets
+docker-compose.override.yml
+

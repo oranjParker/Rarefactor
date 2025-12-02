@@ -1,0 +1,11 @@
+version: v2
+plugins:
+  # Generates the Types (_pb2.py)
+  - remote: buf.build/protocolbuffers/python
+    out: generated
+  # Generates the gRPC Stubs (_pb2_grpc.py)
+  - remote: buf.build/grpc/python
+    out: generated
+  # Generates Type Hints (.pyi) - Critical for your IDE!
+  - remote: buf.build/protocolbuffers/pyi
+    out: generated

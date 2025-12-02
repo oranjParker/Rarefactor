@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package search;
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+
+service SearchEngine {
+  rpc Autocomplete (AutocompleteRequest) returns (AutocompleteResponse);
+  rpc Search (SearchRequest) returns (SearchResponse);
+  rpc UpdateDocument(UpdateDocumentRequest) returns (Document);
+}
+
+message AutocompleteRequest {
+  string prefix = 1;
+  int32 limit = 2;
+}
+
+message AutocompleteResponse {
+  repeated string suggestions = 1;
+  double duration_ms = 2;
+}
+
+message SearchRequest {
+  string query = 1;
+}
+
+message SearchResponse {
+  repeated Document results = 1;
+  int32 total_hits = 2;
+}
+
+message Document {
+  string url = 1;
+  string title = 2;
+  string snippet = 3;
+  float score = 4;
+}
+
+message UpdateDocumentRequest {
+  string url = 1;
+  Document document = 2;
+  google.protobuf.FieldMask update_mask = 3;
+}
