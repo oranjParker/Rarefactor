@@ -1,11 +1,15 @@
 version: v2
 plugins:
-  # Generates the Types (_pb2.py)
+  # --- PYTHON BACKEND GENERATION ---
   - remote: buf.build/protocolbuffers/python
-    out: generated
-  # Generates the gRPC Stubs (_pb2_grpc.py)
+    out: backend/generated
   - remote: buf.build/grpc/python
-    out: generated
-  # Generates Type Hints (.pyi) - Critical for your IDE!
+    out: backend/generated
   - remote: buf.build/protocolbuffers/pyi
-    out: generated
+    out: backend/generated
+
+  # --- TYPESCRIPT FRONTEND GENERATION  ---
+  # - remote: buf.build/bufbuild/es
+  #   out: frontend/src/generated
+  # - remote: buf.build/bufbuild/connect-web
+  #   out: frontend/src/generated

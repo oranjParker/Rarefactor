@@ -1,13 +1,13 @@
-.PHONY: gen lint run
+.PHONY: gen backend-run
 
-# 1. Lint your protos (Senior Engineer move)
-lint:
-	buf lint protos
-
-# 2. Generate code using the configuration in buf.gen.yaml
+# 1. Generate ALL code (Python + TS) from the root protos
 gen:
+	mkdir -p backend/generated
+	# mkdir -p frontend/src/generated
 	buf generate protos
 
-# 3. Run the server
-run:
-	uv run server.py
+backend-run:
+	cd backend && uv run server.py
+
+crawl:
+	cd backend && uv run trigger_crawl.py

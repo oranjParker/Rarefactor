@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rarefactor-server
+    ports:
+      - "50051:50051"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=sqlite+aiosqlite:///./data/rarefactor.db
+    volumes:
+      - ./data:/app/data
+      - ./backend:/app
+    depends_on:
+      - redis
+    command: ["uv", "run", "server.py"]
+
+  redis:
+    image: redis:alpine
+    container_name: rarefactor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # web:
+  #   build: ./frontend
+  #   ports: ["3000:3000"]
+
+volumes:
+  redis_data:
