@@ -8,7 +8,8 @@ from ..cache import get_redis_client
 
 class RedisRankEngine:
     def __init__(self):
-        pass
+        self.redis_client = get_redis_client()
+        self.TRENDING_KEY = "global_search_scores"
 
     async def increment_score(self, term: str) -> None:
         try:
@@ -20,8 +21,8 @@ class RedisRankEngine:
         if not terms:
             return []
         try:
-            redis = get_redis_client()
-            async with redis.pipeline() as pipeline:
+
+            async with self.redis_client.pipeline() as pipeline:
                 for term in terms:
                     pipeline.zscore("global_search_scores", term)
 

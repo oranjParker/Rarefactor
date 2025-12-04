@@ -54,7 +54,7 @@ class SearchService(search_pb2_grpc.SearchEngineServicer):
 
         scored_candidates: List[tuple[str, float]] = await self.ranker.get_scores(candidates)
 
-        scored_candidates.sort(key=lambda x: x.score, reverse=True)
+        scored_candidates.sort(key=lambda x: x[1], reverse=True)
 
         top_candidates = [term for term, score in scored_candidates]
 
