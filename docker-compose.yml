@@ -3,17 +3,17 @@ version: '3.8'
 services:
   server:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     container_name: rarefactor-server
     ports:
       - "50051:50051"
     environment:
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=sqlite+aiosqlite:///./data/rarefactor.db
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/rarefactor
     volumes:
-      - ./data:/app/data
-      - ./backend:/app
+      - ./data:/app/backend/data
+      - ./backend:/app/backend
     depends_on:
       - redis
     command: ["uv", "run", "server.py"]
@@ -30,5 +30,23 @@ services:
   #   build: ./frontend
   #   ports: ["3000:3000"]
 
+  postgres:
+    image: postgres:15-alpine
+    container_name: rarefactor-postgres
+    ports:
+      - "5432:5432" # Expose for PyCharm Database Tool
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=rarefactor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   redis_data:
+  postgres_data:

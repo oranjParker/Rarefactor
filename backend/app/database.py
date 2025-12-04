@@ -1,8 +1,9 @@
+import os
 from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from contextlib import asynccontextmanager
 
-DATABASE_URL = "sqlite+aiosqlite:///./rarefactor.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:password@localhost/dbname")
 
 engine = create_async_engine(
     DATABASE_URL, echo=True, future=True,
@@ -20,8 +21,5 @@ async def init_db():
 @asynccontextmanager
 async def get_session_context():
     async with async_session_factory() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+        yield session
 

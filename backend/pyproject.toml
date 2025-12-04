@@ -12,6 +12,7 @@ dependencies = [
     "greenlet>=3.2.4",
     "grpcio>=1.76.0",
     "grpcio-tools>=1.76.0",
+    "psycopg2-binary>=2.9.11",
     "redis>=7.0.1",
     "sqlmodel>=0.0.27",
 ]

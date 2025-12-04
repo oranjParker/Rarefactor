@@ -10,4 +10,4 @@ backend-run:
 	cd backend && uv run server.py
 
 crawl:
-	cd backend && uv run trigger_crawl.py
+	cd backend && uv run start_crawl.py

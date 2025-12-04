@@ -1,6 +1,6 @@
 import grpc
 from generated import crawler_pb2, crawler_pb2_grpc
-from app.crawler_engine import CrawlerEngine
+from ..crawler_engine import CrawlerEngine
 
 
 class CrawlerService(crawler_pb2_grpc.CrawlerServiceServicer):

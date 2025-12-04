@@ -1,12 +1,13 @@
 import asyncio
 import logging
 from urllib.robotparser import RobotFileParser
+from .cache import get_redis_client
 
 import aiohttp
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-from app.database import get_session_context
-from app.models import Document
+from .database import get_session_context
+from .models import Document
 
 class CrawlerEngine:
     def __init__(self, seed_url: str, max_pages: int = 10):
@@ -16,9 +17,25 @@ class CrawlerEngine:
         self.queue = asyncio.Queue()
         self.session = None
         self.pages_crawled = 0
+        self.pages_saved = 0
+        self.pages_skipped = 0
+
+        self.redis = get_redis_client()
+        self.politeness_delay = 2
 
         self.robots_cache = {}
         self.user_agent = "RarefactorBot/1.0"
+
+    async def _wait_for_politeness(self, domain: str):
+        key = f"crawl:politeness:{domain}"
+        while True:
+            acquired = await self.redis.set(key, "1", nx=True, ex=self.politeness_delay)
+            if acquired:
+                return
+
+            ttl = self.redis.ttl(key)
+            if ttl > 0:
+                await asyncio.sleep(ttl)
 
     async def get_robots_parser(self, url: str) -> RobotFileParser:
         parsed_url = urlparse(url)
@@ -27,6 +44,8 @@ class CrawlerEngine:
 
         if domain in self.robots_cache:
             return self.robots_cache[domain]
+
+        await self._wait_for_politeness(domain)
 
         robots_url = f"{scheme}://{domain}/robots.txt"
         logging.info(f"Crawling robots.txt for {robots_url}")
@@ -76,7 +95,7 @@ class CrawlerEngine:
                 self.visited.add(current_url)
                 self.queue.task_done()
 
-            logging.info(f"Crawl finished. Pages crawled: {self.pages_crawled}")
+            logging.info(f"🏁 Crawl Finished. Fetched: {self.pages_crawled}, Saved: {self.pages_saved}, Skipped: {self.pages_skipped}")
             return self.pages_crawled
 
     async def process_page(self, url: str):
@@ -89,6 +108,9 @@ class CrawlerEngine:
 
                 html = await response.text()
                 soup = BeautifulSoup(html, "html.parser")
+
+                for element in soup(["script", "style", "nav", "footer", "header"]):
+                    element.decompose()
 
                 title = soup.title.string if soup.title else url
                 text_content = soup.get_text()[:500]
@@ -112,6 +134,8 @@ class CrawlerEngine:
             try:
                 doc = Document(url=url, title=title, snippet=snippet, content=snippet)
                 db.add(doc)
+                self.pages_saved += 1
                 await db.commit()
             except Exception as e:
+                self.pages_skipped += 1
                 logging.warning(f"Skipping DB insert for {url}: {e}")

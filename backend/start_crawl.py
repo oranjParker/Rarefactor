@@ -9,7 +9,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "generated"))
 from generated import crawler_pb2, crawler_pb2_grpc
 
 async def start_crawl():
-    async with grpc.aio.insecure_channel('localhost:50051') as channel:
+    async with grpc.aio.insecure_channel('127.0.0.1:50051') as channel:
         stub = crawler_pb2_grpc.CrawlerServiceStub(channel)
 
         print("🚀 Sending Crawl Command to Server...")
