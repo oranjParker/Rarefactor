@@ -8,6 +8,7 @@ services:
     container_name: rarefactor-server
     ports:
       - "50051:50051"
+      - "8000:8000"
     environment:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/rarefactor
@@ -16,7 +17,7 @@ services:
       - ./backend:/app/backend
     depends_on:
       - redis
-    command: ["uv", "run", "server.py"]
+    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   redis:
     image: redis:alpine
@@ -34,7 +35,7 @@ services:
     image: postgres:15-alpine
     container_name: rarefactor-postgres
     ports:
-      - "5432:5432" # Expose for PyCharm Database Tool
+      - "5432:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres

@@ -7,7 +7,7 @@ gen:
 	buf generate protos
 
 backend-run:
-	cd backend && uv run server.py
+	cd backend && uv run uvicorn main:app --reload --port 8000
 
 crawl:
 	cd backend && uv run start_crawl.py

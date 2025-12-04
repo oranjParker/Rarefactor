@@ -26,6 +26,7 @@ RUN buf generate protos
 
 WORKDIR /app/backend
 
+EXPOSE 8000
 EXPOSE 50051
 
-CMD ["uv", "run", "server.py"]
+CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

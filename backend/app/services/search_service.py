@@ -169,22 +169,3 @@ class SearchService(search_pb2_grpc.SearchEngineServicer):
             except Exception as e:
                 logger.error(f"Failed to update document {request.url}: {e}")
                 await context.abort(grpc.StatusCode.INTERNAL, f"Failed to update document: {e}")
-
-
-async def serve_grpc():
-    server = grpc.aio.server()
-
-    servicer = SearchService()
-
-    # Register the servicer
-    search_pb2_grpc.add_SearchServiceServicer_to_server(servicer, server)
-
-    server.add_insecure_port(':50051')
-
-    # CRITICAL: Run the warmup BEFORE we start accepting requests.
-    # Since serve_grpc is awaited in main.py, this will pause startup until DB is read.
-    await servicer.warm_up_trie()
-
-    logger.info("Starting gRPC Server on port 50051...")
-    await server.start()
-    return server
