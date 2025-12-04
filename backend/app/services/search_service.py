@@ -31,7 +31,7 @@ class SearchService(search_pb2_grpc.SearchEngineServicer):
             async with get_session_context() as session:
                 statement = select(DB_Document.title)
                 results = await session.execute(statement)
-                titles = results.all()
+                titles = results.scalars().all()
 
                 for title in titles:
                     if title:
@@ -105,7 +105,7 @@ class SearchService(search_pb2_grpc.SearchEngineServicer):
                 ).params(q=query).limit(20)
 
                 db_results = await session.execute(statement)
-                docs = db_results.all()
+                docs = db_results.scalars().all()
                 for doc in docs:
                     snippet_preview = (doc.content[:200] + '...') if len(doc.content) > 200 else doc.content
                     pb_doc = search_pb2.Document(
@@ -149,7 +149,7 @@ class SearchService(search_pb2_grpc.SearchEngineServicer):
             try:
                 statement = select(DB_Document).where(DB_Document.url == request.url)
                 results = await session.execute(statement)
-                db_doc = results.first()
+                db_doc = results.scalars().first()
 
                 if not db_doc:
                     await context.abort(grpc.StatusCode.NOT_FOUND, "Document not found")

@@ -2,6 +2,7 @@ import grpc, os, sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from google.protobuf.json_format import MessageToDict
+from fastapi.middleware.cors import CORSMiddleware
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "generated"))
 
@@ -29,6 +30,15 @@ async def lifespan(app: FastAPI):
         await grpc_server.stop(grace=5)
 
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    # Allow your Vite frontend (localhost:5173) to connect
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 def get_search_stub():
     if not grpc_channel:

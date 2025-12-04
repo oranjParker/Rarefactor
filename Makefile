@@ -1,4 +1,4 @@
-.PHONY: gen backend-run
+cd.PHONY: gen backend-run
 
 # 1. Generate ALL code (Python + TS) from the root protos
 gen:

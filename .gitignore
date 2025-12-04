@@ -36,3 +36,20 @@ npm-debug.log*
 # Ignore overrides that might contain local secrets
 docker-compose.override.yml
 
+# --- React Client (Vite) ---
+# Build output
+client/dist/
+# Dependencies
+client/node_modules/
+# Vite cache
+client/.vite/
+# Coverage and lint caches
+client/coverage/
+client/.eslintcache
+# Local env files (do not commit secrets)
+client/.env*
+# OS/Editor junk inside client
+client/.DS_Store
+client/.idea/
+client/.vscode/
+
