@@ -1,73 +1,88 @@
-# React + TypeScript + Vite
+# Client — React + Vite + TypeScript + Tailwind CSS v3
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This is the Rarefactor frontend, a single‑page React app built with Vite and styled using Tailwind CSS v3. It talks to the FastAPI backend over HTTP for autocomplete and search.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19 + TypeScript
+- Vite 7
+- Tailwind CSS v3 (with PostCSS + Autoprefixer)
 
-## React Compiler
+Note: We previously experimented with Mantine, but the UI has been migrated to Tailwind. Mantine is no longer used by the app at runtime. Some legacy files may still reference Mantine and can be cleaned up in a future pass.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Project layout (client)
 
-## Expanding the ESLint configuration
+- `src/App.tsx` — entry component rendering the unified search interface
+- `src/components/SearchInterface.tsx` — combined search input + suggestions + results
+- `src/hooks/useAutocomplete.ts` — fetches suggestions from the backend
+- `index.css` — Tailwind directives and minimal base styles
+- `tailwind.config.js` — Tailwind v3 configuration
+- `postcss.config.js` — standard PostCSS setup
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Backend contract
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+The UI expects the backend (FastAPI) to expose:
+- `GET /autocomplete?q=term&limit=10` → `{ suggestions: string[] }`
+- `GET /search?q=query` → `{ results: Array<{ title?: string; url?: string; snippet?: string }> }`
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+See `../backend/README.md` for backend details.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Development
+
+Prerequisites: Node 18+ (Node 20 recommended). You may see a Vite warning if your Node is below the suggested version; it does not block development in this demo.
+
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the dev server:
+   ```bash
+   npm run dev
+   ```
+3. Open http://localhost:5173
+
+Make sure the backend is running at http://localhost:8000.
+
+## Build & preview
+
+```bash
+npm run build
+npm run preview
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Tailwind setup
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Tailwind v3 is configured with a standard PostCSS stack.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- `tailwind.config.js`
+  ```js
+  /** @type {import('tailwindcss').Config} */
+  module.exports = {
+    content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+    theme: { extend: {} },
+    plugins: [],
+  };
+  ```
+- `postcss.config.js`
+  ```js
+  export default {
+    plugins: { tailwindcss: {}, autoprefixer: {} },
+  }
+  ```
+- `src/index.css`
+  ```css
+  @tailwind base;
+  @tailwind components;
+  @tailwind utilities;
+  @layer base { html, body, #root { height: 100%; } body { @apply bg-white text-gray-900 antialiased; } }
+  ```
+
+## Scripts
+
+- `npm run dev` — start Vite dev server
+- `npm run build` — type‑check and build for production
+- `npm run preview` — preview the production build
+
+## Known notes
+
+- If you see a Node.js engine warning from Vite (requesting a newer 20.x), it’s informational — builds and dev server still work for this project.
