@@ -1,6 +1,7 @@
 # Rarefactor
 
 Rarefactor is a two-part demo application that showcases a Python backend with gRPC + FastAPI and a modern React (Vite + TypeScript + Tailwind CSS v3) client. This root README explains the repository layout and the sub-applications inside.
+![](./assets/rarefactor_demo.gif)
 
 ## Repository structure
 
