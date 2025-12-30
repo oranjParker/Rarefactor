@@ -1,11 +1,12 @@
 syntax = "proto3";
 
-package search;
+package protos.v1;
+
+option go_package = "github.com/oranjParker/Rarefactor/backend/generated";
 
 import "google/protobuf/field_mask.proto";
-import "google/protobuf/timestamp.proto";
 
-service SearchEngine {
+service SearchEngineService {
   rpc Autocomplete (AutocompleteRequest) returns (AutocompleteResponse);
   rpc Search (SearchRequest) returns (SearchResponse);
   rpc UpdateDocument(UpdateDocumentRequest) returns (Document);

@@ -1,6 +1,8 @@
 syntax = "proto3";
 
-package crawler;
+package protos.v1;
+
+option go_package = "github.com/oranjParker/Rarefactor/backend/generated";
 
 service CrawlerService {
   rpc Crawl (CrawlRequest) returns (CrawlResponse);

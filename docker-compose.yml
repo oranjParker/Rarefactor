@@ -11,13 +11,16 @@ services:
       - "8000:8000"
     environment:
       - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/rarefactor
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/rarefactor?sslmode=disable
     volumes:
       - ./data:/app/backend/data
       - ./backend:/app/backend
     depends_on:
-      - redis
-    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+      postgres:
+        - condition: service_healthy
+      redis:
+        - condition: service_healthy
+    command: ["./main"]
 
   redis:
     image: redis:alpine
@@ -41,6 +44,7 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=rarefactor
     volumes:
+      - ./migrations:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
