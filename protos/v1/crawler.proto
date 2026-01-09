@@ -2,10 +2,16 @@ syntax = "proto3";
 
 package protos.v1;
 
+import "google/api/annotations.proto";
 option go_package = "github.com/oranjParker/Rarefactor/backend/generated";
 
 service CrawlerService {
-  rpc Crawl (CrawlRequest) returns (CrawlResponse);
+  rpc Crawl (CrawlRequest) returns (CrawlResponse) {
+    option (google.api.http) = {
+      post: "/v1/crawl"
+      body: "*"
+    };
+  }
 }
 
 message CrawlRequest {

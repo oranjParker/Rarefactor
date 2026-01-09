@@ -4,38 +4,83 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	generated "github.com/oranjParker/Rarefactor/generated/protos/v1"
-	actors "github.com/oranjParker/Rarefactor/internal/crawler/actors"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jimsmart/grobotstxt"
+	"github.com/oranjParker/Rarefactor/internal/crawler/actors"
+	"github.com/redis/go-redis/v9"
 )
 
 const MaxBodySize = 2 * 1024 * 1024
+const UserAgent = "RarefactorBot/1.0"
+const RobotsCacheTTL = 24 * time.Hour
 
 type Engine struct {
 	coordinator *actors.Coordinator
 	concurrency int
+	dbPool      *pgxpool.Pool
+	redisClient *redis.Client
+	httpClient  *http.Client
 }
 
-func NewEngine(concurrency int, politeness time.Duration) *Engine {
+func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redisClient *redis.Client) *Engine {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.MaxIdleConns = 100
+	transport.IdleConnTimeout = 90 * time.Second
+
 	return &Engine{
+		dbPool:      db,
 		coordinator: actors.NewCoordinator(politeness),
 		concurrency: concurrency,
+		redisClient: redisClient,
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
-func (e *Engine) Run(seedURL string) {
+func (e *Engine) Run(ctx context.Context, seedURL, namespace string) {
+	log.Printf("[Engine] Starting crawl: %s", seedURL)
+
 	for i := 0; i < e.concurrency; i++ {
-		go func() {
-			for url := range e.coordinator.JobsChan {
-				links, err := e.fetchAndParse(url)
-				e.coordinator.ResultsChan <- actors.CrawlResult{URL: url, Links: links, Err: err}
+		go func(id int) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case targetURL, ok := <-e.coordinator.JobsChan:
+					if !ok {
+						return
+					}
+
+					allowed, _ := e.isAllowed(ctx, targetURL)
+					if !allowed {
+						e.coordinator.ResultsChan <- actors.CrawlResult{URL: targetURL, Err: fmt.Errorf("robots not permitted")}
+						continue
+					}
+
+					links, title, content, err := e.fetchAndParse(ctx, targetURL)
+					if err == nil {
+						_ = e.saveToPostgres(ctx, targetURL, title, content, namespace)
+					}
+
+					e.coordinator.ResultsChan <- actors.CrawlResult{
+						URL:     targetURL,
+						Links:   links,
+						Title:   title,
+						Content: content,
+						Err:     err,
+					}
+				}
 			}
-		}()
+		}(i)
 	}
 
 	e.coordinator.AddURL(seedURL)
@@ -46,10 +91,10 @@ func (e *Engine) Run(seedURL string) {
 		var jobStream chan string
 		var nextJob string
 
-		url, ok := e.coordinator.GetNextJob()
+		targetUrl, ok := e.coordinator.GetNextJob()
 
 		if ok {
-			nextJob = url
+			nextJob = targetUrl
 			jobStream = e.coordinator.JobsChan
 		}
 
@@ -73,46 +118,52 @@ func (e *Engine) Run(seedURL string) {
 
 		}
 	}
-
-	close(e.coordinator.JobsChan)
+	log.Printf("[Engine] Crawl finished for seed: %s", seedURL)
 }
 
-func (e *Engine) fetchAndParse(url string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
+func (e *Engine) fetchAndParse(ctx context.Context, url string) ([]string, string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	req.Header.Set("User-Agent", "RarefactorBot/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
-	defer resp.Body.Close()
+
+	defer func() {
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("bad status: %d", resp.StatusCode)
+		return nil, "", "", fmt.Errorf("bad status: %d", resp.StatusCode)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.Contains(contentType, "text/html") {
+		return nil, "", "", fmt.Errorf("non-html content")
 	}
 
 	limitReader := io.LimitReader(resp.Body, MaxBodySize)
 
 	doc, err := goquery.NewDocumentFromReader(limitReader)
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 
 	doc.Find("script, style, nav, footer, header").Each(func(i int, s *goquery.Selection) {
 		s.Remove()
 	})
 
-	title := doc.Find("title").Text()
+	title := strings.TrimSpace(doc.Find("title").Text())
 	if title == "" {
 		title = url
 	}
-	fmt.Printf("Crawled: %s\n", title)
+	content := strings.TrimSpace(doc.Find("body").Text())
+	content = strings.Join(strings.Fields(content), " ")
 
 	var links []string
 	doc.Find("a[href]").Each(func(i int, s *goquery.Selection) {
@@ -122,12 +173,56 @@ func (e *Engine) fetchAndParse(url string) ([]string, error) {
 		}
 
 		absoluteUrl := resolveURL(url, href)
-		if absoluteUrl != "" && strings.HasPrefix(url, "http") {
+		if absoluteUrl != "" && isLikelyHTML(absoluteUrl) {
 			links = append(links, absoluteUrl)
 		}
 	})
 
-	return links, nil
+	fmt.Printf("Crawled: %s\n", title)
+	return links, title, content, nil
+}
+
+func (e *Engine) isAllowed(ctx context.Context, targetURL string) (bool, error) {
+	u, err := url.Parse(targetURL)
+	if err != nil {
+		return false, err
+	}
+
+	cacheKey := fmt.Sprintf("robots:%s", u.Host)
+	robotsData, err := e.redisClient.Get(ctx, cacheKey).Result()
+
+	if err == redis.Nil {
+		robotsURL := fmt.Sprintf("%s://%s/robots.txt", u.Scheme, u.Host)
+		resp, err := http.Get(robotsURL)
+		if err != nil {
+			return true, nil
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == 404 {
+			e.redisClient.Set(ctx, cacheKey, "", time.Hour)
+			return true, nil
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		robotsData = string(body)
+		e.redisClient.Set(ctx, cacheKey, robotsData, RobotsCacheTTL)
+	} else if err != nil {
+		return true, nil // Fallback
+	}
+
+	return grobotstxt.AgentAllowed(robotsData, UserAgent, u.Path), nil
+}
+
+func isLikelyHTML(u string) bool {
+	lower := strings.ToLower(u)
+	extensions := []string{".jpg", ".jpeg", ".png", ".gif", ".pdf", ".zip", ".webp", ".mp4", ".mp3", ".js", ".css"}
+	for _, ext := range extensions {
+		if strings.HasSuffix(lower, ext) {
+			return false
+		}
+	}
+	return strings.HasPrefix(lower, "http")
 }
 
 func resolveURL(base, relative string) string {
@@ -142,27 +237,27 @@ func resolveURL(base, relative string) string {
 	return baseURL.ResolveReference(relURL).String()
 }
 
-func (e *Engine) saveToPostgres(ctx context.Context, doc *generated.Document) (int, error) {
-	var id int
+func (e *Engine) saveToPostgres(ctx context.Context, urlStr, title, content, namespace string) error {
 	query := `
-		INSERT INTO documents (url, domain, title, content, raw_html_size)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO documents (url, domain, title, content, raw_content_size, namespace)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (url) DO UPDATE SET
 			title = EXCLUDED.title,
 			content = EXCLUDED.content,
+		    raw_content_size = EXCLUDED.raw_content_size,
 			crawled_at = CURRENT_TIMESTAMP
-		RETURNING id;
 	`
 
-	u, _ := url.Parse(doc.Url)
+	u, _ := url.Parse(urlStr)
 
-	err := e.dbPool.QueryRow(ctx, query,
-		doc.Url,
+	_, err := e.dbPool.Exec(ctx, query,
+		urlStr,
 		u.Host,
-		doc.Title,
-		doc.Content,
-		len(doc.Content),
-	).Scan(&id)
+		title,
+		content,
+		len(content),
+		namespace,
+	)
 
-	return id, err
+	return err
 }

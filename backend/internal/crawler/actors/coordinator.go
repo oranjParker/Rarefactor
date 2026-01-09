@@ -7,9 +7,11 @@ import (
 )
 
 type CrawlResult struct {
-	URL   string
-	Links []string
-	Err   error
+	URL     string
+	Title   string
+	Content string
+	Links   []string
+	Err     error
 }
 
 type DomainRecord struct {

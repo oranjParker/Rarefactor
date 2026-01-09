@@ -2,14 +2,34 @@ syntax = "proto3";
 
 package protos.v1;
 
-option go_package = "github.com/oranjParker/Rarefactor/backend/generated";
-
+import "google/api/annotations.proto";
 import "google/protobuf/field_mask.proto";
 
+option go_package = "github.com/oranjParker/Rarefactor/generated/protos/v1";
+
 service SearchEngineService {
-  rpc Autocomplete (AutocompleteRequest) returns (AutocompleteResponse);
-  rpc Search (SearchRequest) returns (SearchResponse);
-  rpc UpdateDocument(UpdateDocumentRequest) returns (Document);
+  // Real-time autocomplete suggestions
+  rpc Autocomplete (AutocompleteRequest) returns (AutocompleteResponse) {
+    option (google.api.http) = {
+      get: "/v1/autocomplete"
+    };
+  }
+
+  // Semantic search across crawled documents
+  rpc Search (SearchRequest) returns (SearchResponse) {
+    option (google.api.http) = {
+      post: "/v1/search"
+      body: "*"
+    };
+  }
+
+  // Update specific document fields (internal use)
+  rpc UpdateDocument(UpdateDocumentRequest) returns (Document) {
+    option (google.api.http) = {
+      patch: "/v1/documents/{url}"
+      body: "document"
+    };
+  }
 }
 
 message AutocompleteRequest {
@@ -24,6 +44,8 @@ message AutocompleteResponse {
 
 message SearchRequest {
   string query = 1;
+  int32 limit = 2;
+  string namespace = 3;
 }
 
 message SearchResponse {
@@ -36,6 +58,7 @@ message Document {
   string title = 2;
   string snippet = 3;
   float score = 4;
+  string content = 5;
 }
 
 message UpdateDocumentRequest {
