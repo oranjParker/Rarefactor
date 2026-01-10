@@ -4,7 +4,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     container_name: rarefactor-server
     ports:
       - "50051:50051"

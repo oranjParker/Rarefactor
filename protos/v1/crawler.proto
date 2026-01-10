@@ -3,7 +3,7 @@ syntax = "proto3";
 package protos.v1;
 
 import "google/api/annotations.proto";
-option go_package = "github.com/oranjParker/Rarefactor/backend/generated";
+option go_package = "github.com/oranjParker/Rarefactor/generated/protos/v1";
 
 service CrawlerService {
   rpc Crawl (CrawlRequest) returns (CrawlResponse) {
