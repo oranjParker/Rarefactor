@@ -11,23 +11,37 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
+	"github.com/oranjParker/Rarefactor/internal/database"
+	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
 	AutocompleteKey       = "rarefactor:autocomplete"
 	GlobalSearchScoresKey = "global_search_scores"
+	CollectionName        = "documents"
 )
 
 type SearchServer struct {
-	dbPool *pgxpool.Pool
-	rdb    *redis.Client
+	dbPool   *pgxpool.Pool
+	rdb      *redis.Client
+	qdb      *database.QdrantClient
+	embedder *search.Embedder
 	pb.UnimplementedSearchEngineServiceServer
 }
 
 type scoredTerm struct {
 	term  string
 	score float64
+}
+
+func NewSearchServer(db *pgxpool.Pool, rdb *redis.Client, qdb *database.QdrantClient, emb *search.Embedder) *SearchServer {
+	return &SearchServer{
+		dbPool:   db,
+		rdb:      rdb,
+		qdb:      qdb,
+		embedder: emb,
+	}
 }
 
 func (s *SearchServer) Autocomplete(ctx context.Context, req *pb.AutocompleteRequest) (*pb.AutocompleteResponse, error) {
@@ -49,6 +63,9 @@ func (s *SearchServer) Autocomplete(ctx context.Context, req *pb.AutocompleteReq
 		Stop:  "[" + prefix + "\xff",
 		Count: int64(limit * 2),
 	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis lookup failed: %w", err)
+	}
 
 	if len(terms) == 0 {
 		return &pb.AutocompleteResponse{
@@ -58,7 +75,6 @@ func (s *SearchServer) Autocomplete(ctx context.Context, req *pb.AutocompleteReq
 	}
 
 	pipe := s.rdb.Pipeline()
-
 	scoreCmds := make([]*redis.FloatCmd, len(terms))
 	for i, term := range terms {
 		scoreCmds[i] = pipe.ZScore(ctx, GlobalSearchScoresKey, term)
@@ -79,11 +95,6 @@ func (s *SearchServer) Autocomplete(ctx context.Context, req *pb.AutocompleteReq
 		if n := cmp.Compare(b.score, a.score); n != 0 {
 			return n
 		}
-
-		if n := cmp.Compare(len(a.term), len(b.term)); n != 0 {
-			return n
-		}
-
 		return cmp.Compare(a.term, b.term)
 	})
 
@@ -106,9 +117,32 @@ func (s *SearchServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.S
 
 	_ = s.rdb.ZIncrBy(ctx, GlobalSearchScoresKey, 1.0, query).Err()
 
+	vector, err := s.embedder.ComputeEmbeddings(ctx, query, true)
+	if err != nil {
+		return nil, fmt.Errorf("embedding failed: %w", err)
+	}
+
+	limit := uint64(req.Limit)
+	if limit <= 0 {
+		limit = 10
+	}
+	points, err := s.qdb.Query(ctx, CollectionName, vector, limit)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant query failed: %w", err)
+	}
+
+	results := make([]*pb.Document, 0, len(points))
+	for _, p := range points {
+		payload := p.GetPayload()
+		results = append(results, &pb.Document{
+			Url:   payload["url"].GetStringValue(),
+			Title: payload["title"].GetStringValue(),
+			Score: p.GetScore(),
+		})
+	}
 	return &pb.SearchResponse{
-		Results:   []*pb.Document{},
-		TotalHits: 0,
+		Results:   results,
+		TotalHits: int32(len(results)),
 	}, nil
 }
 

@@ -5,21 +5,24 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
 	"github.com/oranjParker/Rarefactor/internal/database"
+	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/oranjParker/Rarefactor/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
 
 	pool, err := database.NewPool(ctx)
 	if err != nil {
-		log.Fatalf("Failed to connect to DB: %v", err)
+		log.Fatalf("Failed to connect to Postgres: %v", err)
 	}
 	defer pool.Close()
 
@@ -29,15 +32,29 @@ func main() {
 	}
 	defer rdb.Close()
 
+	qdb, err := database.NewQdrantClient(ctx)
+	if err != nil {
+		log.Fatalf("Qdrant failed: %v", err)
+	}
+	defer qdb.Close()
+
+	if err := qdb.EnsureCollection(ctx, "documents"); err != nil {
+		log.Printf("Warning: Qdrant collection setup: %v", err)
+	}
+
+	embedder := search.NewEmbedder()
+
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
 	grpcServer := grpc.NewServer()
+	searchSrv := server.NewSearchServer(pool, rdb, qdb, embedder)
 
-	// pb.RegisterSearchEngineServiceServer(grpcServer, &SearchServer{db : pool})
-	crawlerSrv := server.NewCrawlerServer(pool, rdb)
+	pb.RegisterSearchEngineServiceServer(grpcServer, searchSrv)
+
+	crawlerSrv := server.NewCrawlerServer(pool, rdb, qdb, embedder)
 	pb.RegisterCrawlerServiceServer(grpcServer, crawlerSrv)
 
 	go func() {

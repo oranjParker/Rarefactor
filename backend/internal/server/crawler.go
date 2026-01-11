@@ -8,16 +8,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
 	"github.com/oranjParker/Rarefactor/internal/crawler/engine"
+	"github.com/oranjParker/Rarefactor/internal/database"
+	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/redis/go-redis/v9"
 )
 
 type CrawlerServer struct {
 	db  *pgxpool.Pool
 	eng *engine.Engine
+	qdb *database.QdrantClient
+	emb *search.Embedder
 }
 
-func NewCrawlerServer(db *pgxpool.Pool, rdb *redis.Client) *CrawlerServer {
-	eng := engine.NewEngine(db, 10, 2*time.Second, rdb)
+func NewCrawlerServer(db *pgxpool.Pool, rdb *redis.Client, qdb *database.QdrantClient, emb *search.Embedder) *CrawlerServer {
+	eng := engine.NewEngine(db, 10, 2*time.Second, rdb, qdb, emb)
 	return &CrawlerServer{db: db, eng: eng}
 }
 

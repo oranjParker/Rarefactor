@@ -14,31 +14,40 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jimsmart/grobotstxt"
 	"github.com/oranjParker/Rarefactor/internal/crawler/actors"
+	"github.com/oranjParker/Rarefactor/internal/database"
+	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/redis/go-redis/v9"
 )
 
-const MaxBodySize = 2 * 1024 * 1024
-const UserAgent = "RarefactorBot/1.0"
-const RobotsCacheTTL = 24 * time.Hour
+const (
+	MaxBodySize    = 2 * 1024 * 1024
+	UserAgent      = "RarefactorBot/1.0"
+	RobotsCacheTTL = 24 * time.Hour
+)
 
 type Engine struct {
-	coordinator *actors.Coordinator
-	concurrency int
-	dbPool      *pgxpool.Pool
-	redisClient *redis.Client
-	httpClient  *http.Client
+	coordinator  *actors.Coordinator
+	concurrency  int
+	dbPool       *pgxpool.Pool
+	redisClient  *redis.Client
+	qdrantClient *database.QdrantClient
+	embedder     *search.Embedder
+	httpClient   *http.Client
 }
 
-func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redisClient *redis.Client) *Engine {
+func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redisClient *redis.Client,
+	qdb *database.QdrantClient, emb *search.Embedder) *Engine {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConns = 100
 	transport.IdleConnTimeout = 90 * time.Second
 
 	return &Engine{
-		dbPool:      db,
-		coordinator: actors.NewCoordinator(politeness),
-		concurrency: concurrency,
-		redisClient: redisClient,
+		dbPool:       db,
+		coordinator:  actors.NewCoordinator(politeness),
+		concurrency:  concurrency,
+		redisClient:  redisClient,
+		qdrantClient: qdb,
+		embedder:     emb,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: transport,
@@ -68,7 +77,7 @@ func (e *Engine) Run(ctx context.Context, seedURL, namespace string) {
 
 					links, title, content, err := e.fetchAndParse(ctx, targetURL)
 					if err == nil {
-						_ = e.saveToPostgres(ctx, targetURL, title, content, namespace)
+						_ = e.persistDocument(ctx, targetURL, title, content, namespace)
 					}
 
 					e.coordinator.ResultsChan <- actors.CrawlResult{
@@ -237,7 +246,7 @@ func resolveURL(base, relative string) string {
 	return baseURL.ResolveReference(relURL).String()
 }
 
-func (e *Engine) saveToPostgres(ctx context.Context, urlStr, title, content, namespace string) error {
+func (e *Engine) persistDocument(ctx context.Context, urlStr, title, content, namespace string) error {
 	query := `
 		INSERT INTO documents (url, domain, title, content, raw_content_size, namespace)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -258,6 +267,32 @@ func (e *Engine) saveToPostgres(ctx context.Context, urlStr, title, content, nam
 		len(content),
 		namespace,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	snippet := content
+	if len(snippet) > 200 {
+		snippet = snippet[:200] + "..."
+	}
+	vector, err := e.embedder.ComputeEmbeddings(ctx, title+" "+snippet, false)
+	if err != nil {
+		log.Printf("[Engine] Failed to embed %s: %v", urlStr, err)
+	}
+
+	if err := e.qdrantClient.Upsert(ctx, "documents", urlStr, title, snippet, vector); err != nil {
+		log.Printf("[Engine] Qdrant upsert failed for %s: %v", urlStr, err)
+	}
+
+	if title != "" {
+		err = e.redisClient.ZAdd(ctx, "rarefactor:autocomplete", redis.Z{
+			Score:  0,
+			Member: strings.ToLower(title),
+		}).Err()
+		if err != nil {
+			log.Printf("[Redis] Failed to add title to autocomplete: %v", err)
+		}
+	}
+
+	return nil
 }

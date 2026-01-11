@@ -4,9 +4,11 @@ go 1.25.0
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
+	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.4
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/jimsmart/grobotstxt v1.0.3
+	github.com/qdrant/go-client v1.16.2
 	github.com/redis/go-redis/v9 v9.17.2
 	google.golang.org/genproto/googleapis/api v0.0.0-20251222181119-0a764e51fe1b
 	google.golang.org/grpc v1.78.0
