@@ -72,9 +72,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to register Search Gateway: %v", err)
 	}
+	err = pb.RegisterSearchEngineServiceHandlerFromEndpoint(ctx, mux, "localhost:50051", opts)
+	if err != nil {
+		log.Fatalf("Failed to register Search Gateway: %v", err)
+	}
 
+	httpServer := &http.Server{
+		Addr:    ":8000",
+		Handler: server.AllowCORS(mux),
+	}
 	log.Println("Starting HTTP Gateway on :8000")
-	if err := http.ListenAndServe("0.0.0.0:8000", mux); err != nil {
+	if err := httpServer.ListenAndServe(); err != nil {
 		log.Fatalf("failed to serve Gateway: %v", err)
 	}
 }

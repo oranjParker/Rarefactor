@@ -6,6 +6,8 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
@@ -16,55 +18,81 @@ type QdrantClient struct {
 }
 
 func NewQdrantClient(ctx context.Context) (*QdrantClient, error) {
-	addr := os.Getenv("QDRANT_GRPC_URL")
+	addr := os.Getenv("QDRANT_URL")
 	if addr == "" {
+		fmt.Println("[Qdrant] WARNING: QDRANT_URL env is empty, defaulting to localhost:6334")
 		addr = "localhost:6334"
 	}
 
-	host, portStr, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-		portStr = "6334"
-	}
+	fmt.Printf("[Qdrant] Attempting to connect to: %s\n", addr)
 
-	port, _ := strconv.Atoi(portStr)
+	host := "localhost"
+	port := 6334
+
+	if strings.Contains(addr, ":") {
+		h, pStr, err := net.SplitHostPort(addr)
+		if err == nil {
+			host = h
+			if p, err := strconv.Atoi(pStr); err == nil {
+				port = p
+			}
+		} else {
+			host = addr
+		}
+	} else {
+		host = addr
+	}
 
 	client, err := qdrant.NewClient(&qdrant.Config{
 		Host: host,
 		Port: port,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize qdrant client: %w", err)
+		return nil, fmt.Errorf("failed to init qdrant client: %w", err)
 	}
 
-	return &QdrantClient{
-		Client: client,
-	}, nil
+	return &QdrantClient{Client: client}, nil
 }
 
 func (q *QdrantClient) EnsureCollection(ctx context.Context, name string) error {
-	exists, err := q.Client.CollectionExists(ctx, name)
+	collections, err := q.Client.ListCollections(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to list collections: %w", err)
 	}
+
+	exists := false
+	for _, c := range collections {
+		if c == name {
+			exists = true
+			break
+		}
+	}
+
 	if exists {
+		fmt.Printf("[Qdrant] Collection '%s' verified\n", name)
 		return nil
 	}
 
+	fmt.Printf("[Qdrant] Creating collection '%s' (768 dims)\n", name)
 	return q.Client.CreateCollection(ctx, &qdrant.CreateCollection{
 		CollectionName: name,
-		VectorsConfig: &qdrant.VectorsConfig{
-			Config: &qdrant.VectorsConfig_Params{
-				Params: &qdrant.VectorParams{
-					Size:     768,
-					Distance: qdrant.Distance_Cosine,
-				},
-			},
-		},
+		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
+			Size:     768,
+			Distance: qdrant.Distance_Cosine,
+		}),
 	})
 }
 
+func SanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	// Replace invalid sequences with the Unicode replacement character
+	return strings.ToValidUTF8(s, "")
+}
+
 func (q *QdrantClient) Upsert(ctx context.Context, collection, url, title, snippet string, vector []float32) error {
+	sanitizedContent := SanitizeUTF8(snippet)
 	id := uuid.NewMD5(uuid.NameSpaceURL, []byte(url)).String()
 
 	_, err := q.Client.Upsert(ctx, &qdrant.UpsertPoints{
@@ -76,7 +104,7 @@ func (q *QdrantClient) Upsert(ctx context.Context, collection, url, title, snipp
 				Payload: qdrant.NewValueMap(map[string]any{
 					"url":     url,
 					"title":   title,
-					"snippet": snippet,
+					"snippet": sanitizedContent,
 				}),
 			},
 		},

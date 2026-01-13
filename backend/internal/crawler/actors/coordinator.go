@@ -2,6 +2,7 @@ package actors
 
 import (
 	"container/heap"
+	"math"
 	"net/url"
 	"time"
 )
@@ -17,13 +18,23 @@ type CrawlResult struct {
 type DomainRecord struct {
 	Domain    string
 	LastCrawl time.Time
+	PageCount int
 }
+
 type DomainHeap []DomainRecord
 
-func (h DomainHeap) Len() int           { return len(h) }
-func (h DomainHeap) Less(i, j int) bool { return h[i].LastCrawl.Before(h[j].LastCrawl) }
-func (h DomainHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *DomainHeap) Push(x any)        { *h = append(*h, x.(DomainRecord)) }
+func (h DomainHeap) Len() int { return len(h) }
+func (h DomainHeap) Less(i, j int) bool {
+	penaltyI := math.Log1p(float64(h[i].PageCount)) * 10
+	penaltyJ := math.Log1p(float64(h[j].PageCount)) * 10
+
+	weightI := h[i].LastCrawl.Add(time.Duration(penaltyI) * time.Second)
+	weightJ := h[j].LastCrawl.Add(time.Duration(penaltyJ) * time.Second)
+
+	return weightI.Before(weightJ)
+}
+func (h DomainHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *DomainHeap) Push(x any)   { *h = append(*h, x.(DomainRecord)) }
 
 func (h *DomainHeap) Pop() any {
 	old := *h
@@ -34,25 +45,27 @@ func (h *DomainHeap) Pop() any {
 }
 
 type Coordinator struct {
-	JobsChan      chan string
-	ResultsChan   chan CrawlResult
-	domainQueue   map[string][]string
-	history       *DomainHeap
-	visited       map[string]struct{}
-	politeness    time.Duration
-	activeWorkers int
+	JobsChan          chan string
+	ResultsChan       chan CrawlResult
+	domainQueue       map[string][]string
+	history           *DomainHeap
+	visited           map[string]struct{}
+	politeness        time.Duration
+	activeWorkers     int
+	maxPagesPerDomain int
 }
 
 func NewCoordinator(politeness time.Duration) *Coordinator {
 	h := &DomainHeap{}
 	heap.Init(h)
 	return &Coordinator{
-		JobsChan:    make(chan string),
-		ResultsChan: make(chan CrawlResult),
-		domainQueue: make(map[string][]string),
-		history:     h,
-		visited:     make(map[string]struct{}),
-		politeness:  politeness,
+		JobsChan:          make(chan string),
+		ResultsChan:       make(chan CrawlResult),
+		domainQueue:       make(map[string][]string),
+		history:           h,
+		visited:           make(map[string]struct{}),
+		politeness:        politeness,
+		maxPagesPerDomain: 1000,
 	}
 }
 
@@ -113,6 +126,11 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 
 	record := heap.Pop(c.history).(DomainRecord)
 
+	if record.PageCount >= c.maxPagesPerDomain {
+		delete(c.domainQueue, record.Domain)
+		return c.GetNextJob()
+	}
+
 	queue := c.domainQueue[record.Domain]
 	if len(queue) == 0 {
 		return c.GetNextJob()
@@ -122,6 +140,7 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 	c.domainQueue[record.Domain] = queue[1:]
 
 	record.LastCrawl = time.Now()
+	record.PageCount++
 	heap.Push(c.history, record)
 
 	return url, true

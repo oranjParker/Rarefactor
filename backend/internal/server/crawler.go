@@ -21,7 +21,7 @@ type CrawlerServer struct {
 }
 
 func NewCrawlerServer(db *pgxpool.Pool, rdb *redis.Client, qdb *database.QdrantClient, emb *search.Embedder) *CrawlerServer {
-	eng := engine.NewEngine(db, 10, 2*time.Second, rdb, qdb, emb)
+	eng := engine.NewEngine(db, 25, 2*time.Second, rdb, qdb, emb)
 	return &CrawlerServer{db: db, eng: eng}
 }
 

@@ -17,7 +17,7 @@ type Embedder struct {
 func NewEmbedder() *Embedder {
 	url := os.Getenv("EMBEDDING_URL")
 	if url == "" {
-		url = "http://localhost:7997/v1"
+		url = "http://localhost:7997"
 	}
 	return &Embedder{
 		baseURL:    url,
@@ -62,7 +62,7 @@ func (e *Embedder) ComputeEmbeddings(ctx context.Context, text string, isQuery b
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("[Embedder] error status %d", resp.StatusCode)
+		return nil, fmt.Errorf("[Embedder] %s/embeddings error status %d", e.baseURL, resp.StatusCode)
 	}
 
 	var result EmbedResponse
