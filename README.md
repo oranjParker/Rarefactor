@@ -1,5 +1,7 @@
 # Rarefactor
 
+![Rarefactor Demo](assets/rarefactor_demo.gif)
+
 Rarefactor is a high-performance search engine and crawler architecture, recently refactored from a Python MVP into a Go-based system. It features a modern React (Vite + TypeScript + Tailwind CSS v3) client.
 
 ## Project Status
