@@ -1,7 +1,10 @@
-package server
+package utils
 
 import (
 	"net/http"
+	"net/url"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 func AllowCORS(h http.Handler) http.Handler {
@@ -17,4 +20,20 @@ func AllowCORS(h http.Handler) http.Handler {
 
 		h.ServeHTTP(w, r)
 	})
+}
+
+func GetBaseDomain(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+
+	host := u.Hostname()
+
+	domain, err := publicsuffix.EffectiveTLDPlusOne(host)
+	if err != nil {
+		return host, nil
+	}
+
+	return domain, nil
 }

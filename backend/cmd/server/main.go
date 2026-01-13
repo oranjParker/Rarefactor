@@ -12,6 +12,7 @@ import (
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/oranjParker/Rarefactor/internal/server"
+	"github.com/oranjParker/Rarefactor/internal/utils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -79,7 +80,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:    ":8000",
-		Handler: server.AllowCORS(mux),
+		Handler: utils.AllowCORS(mux),
 	}
 	log.Println("Starting HTTP Gateway on :8000")
 	if err := httpServer.ListenAndServe(); err != nil {

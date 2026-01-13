@@ -13,7 +13,7 @@ export const useSearch = (query: string) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`http://localhost:8000/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`http://localhost:8000/v1/search?q=${encodeURIComponent(query)}`);
         if (!res.ok) throw new Error('Search failed');
 
         const data = await res.json();

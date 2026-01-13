@@ -5,6 +5,8 @@ import (
 	"math"
 	"net/url"
 	"time"
+
+	"github.com/oranjParker/Rarefactor/internal/utils"
 )
 
 type CrawlResult struct {
@@ -49,6 +51,7 @@ type Coordinator struct {
 	ResultsChan       chan CrawlResult
 	domainQueue       map[string][]string
 	history           *DomainHeap
+	domainCounts      map[string]int
 	visited           map[string]struct{}
 	politeness        time.Duration
 	activeWorkers     int
@@ -63,6 +66,7 @@ func NewCoordinator(politeness time.Duration) *Coordinator {
 		ResultsChan:       make(chan CrawlResult),
 		domainQueue:       make(map[string][]string),
 		history:           h,
+		domainCounts:      make(map[string]int),
 		visited:           make(map[string]struct{}),
 		politeness:        politeness,
 		maxPagesPerDomain: 1000,
@@ -73,19 +77,31 @@ func (c *Coordinator) AddURL(rawURL string) {
 	if _, ok := c.visited[rawURL]; ok {
 		return
 	}
-	c.visited[rawURL] = struct{}{}
 
-	u, err := url.Parse(rawURL)
+	baseDomain, err := utils.GetBaseDomain(rawURL)
 	if err != nil {
 		return
 	}
-	domain := u.Host
 
-	if _, ok := c.domainQueue[domain]; !ok {
-		c.domainQueue[domain] = []string{}
-		heap.Push(c.history, DomainRecord{Domain: domain, LastCrawl: time.Unix(0, 0)})
+	if c.domainCounts[baseDomain] >= c.maxPagesPerDomain {
+		return
 	}
-	c.domainQueue[domain] = append(c.domainQueue[domain], rawURL)
+	c.visited[rawURL] = struct{}{}
+
+	u, _ := url.Parse(rawURL)
+	host := u.Host
+
+	if _, ok := c.domainQueue[host]; !ok {
+		c.domainQueue[host] = []string{}
+		record := &DomainRecord{
+			Domain:    host,
+			LastCrawl: time.Unix(0, 0),
+			PageCount: 0,
+		}
+		heap.Push(c.history, *record)
+	}
+
+	c.domainQueue[host] = append(c.domainQueue[host], rawURL)
 }
 
 func (c *Coordinator) ProcessResult(res CrawlResult) {
@@ -126,7 +142,8 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 
 	record := heap.Pop(c.history).(DomainRecord)
 
-	if record.PageCount >= c.maxPagesPerDomain {
+	baseDomain, _ := utils.GetBaseDomain("http://" + record.Domain)
+	if c.domainCounts[baseDomain] >= c.maxPagesPerDomain {
 		delete(c.domainQueue, record.Domain)
 		return c.GetNextJob()
 	}
@@ -136,14 +153,15 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 		return c.GetNextJob()
 	}
 
-	url := queue[0]
+	nextUrl := queue[0]
 	c.domainQueue[record.Domain] = queue[1:]
 
 	record.LastCrawl = time.Now()
 	record.PageCount++
-	heap.Push(c.history, record)
+	c.domainCounts[baseDomain]++
 
-	return url, true
+	heap.Push(c.history, record)
+	return nextUrl, true
 }
 
 func (c *Coordinator) TimeToNextJob() time.Duration {

@@ -27,7 +27,6 @@ type SearchServer struct {
 	rdb      *redis.Client
 	qdb      *database.QdrantClient
 	embedder *search.Embedder
-	pb.UnimplementedSearchEngineServiceServer
 }
 
 type scoredTerm struct {

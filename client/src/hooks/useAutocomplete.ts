@@ -11,7 +11,7 @@ export const useAutocomplete = (debouncedTerm: string) => {
 
     const fetchSuggestions = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/v1/autocomplete?q=${encodeURIComponent(debouncedTerm)}`);
+        const res = await fetch(`http://localhost:8000/v1/autocomplete?prefix=${encodeURIComponent(debouncedTerm)}`);
         const data = await res.json();
         setSuggestions(data.suggestions || []);
       } catch (err) {

@@ -21,7 +21,7 @@ export const SearchInput = ({ initialQuery = '', size = 'lg' }: SearchInputProps
 
   const handleSearch = (query: string) => {
     if (!query.trim()) return;
-    navigate(`/search?q=${encodeURIComponent(query)}`);
+    navigate(`/search?query=${encodeURIComponent(query)}`);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

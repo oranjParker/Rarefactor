@@ -18,8 +18,7 @@ service SearchEngineService {
   // Semantic search across crawled documents
   rpc Search (SearchRequest) returns (SearchResponse) {
     option (google.api.http) = {
-      post: "/v1/search"
-      body: "*"
+      get: "/v1/search"
     };
   }
 

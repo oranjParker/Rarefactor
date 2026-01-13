@@ -34,7 +34,7 @@ export default function SearchInterface() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetch(`http://localhost:8000/v1/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(`http://localhost:8000/v1/search?query=${encodeURIComponent(query)}`);
       const data = await res.json();
       const items: SearchResult[] = data?.results || data?.items || data?.documents || data || [];
       setResults(Array.isArray(items) ? items : []);
