@@ -1,4 +1,4 @@
-package actors
+package crawler
 
 import (
 	"container/heap"
@@ -10,11 +10,21 @@ import (
 )
 
 type CrawlResult struct {
-	URL     string
-	Title   string
-	Content string
-	Links   []string
-	Err     error
+	URL           string
+	Depth         int
+	MaxDepth      int
+	AllowedDomain string
+	Title         string
+	Content       string
+	Links         []string
+	Err           error
+}
+
+type URLJob struct {
+	URL           string
+	Depth         int
+	MaxDepth      int
+	AllowedDomain string
 }
 
 type DomainRecord struct {
@@ -47,9 +57,9 @@ func (h *DomainHeap) Pop() any {
 }
 
 type Coordinator struct {
-	JobsChan          chan string
+	JobsChan          chan URLJob
 	ResultsChan       chan CrawlResult
-	domainQueue       map[string][]string
+	domainQueue       map[string][]URLJob
 	history           *DomainHeap
 	domainCounts      map[string]int
 	visited           map[string]struct{}
@@ -62,9 +72,9 @@ func NewCoordinator(politeness time.Duration) *Coordinator {
 	h := &DomainHeap{}
 	heap.Init(h)
 	return &Coordinator{
-		JobsChan:          make(chan string),
+		JobsChan:          make(chan URLJob),
 		ResultsChan:       make(chan CrawlResult),
-		domainQueue:       make(map[string][]string),
+		domainQueue:       make(map[string][]URLJob),
 		history:           h,
 		domainCounts:      make(map[string]int),
 		visited:           make(map[string]struct{}),
@@ -73,13 +83,20 @@ func NewCoordinator(politeness time.Duration) *Coordinator {
 	}
 }
 
-func (c *Coordinator) AddURL(rawURL string) {
+func (c *Coordinator) AddURL(rawURL string, depth, maxDepth int, allowedDomain string) {
+	if depth > maxDepth {
+		return
+	}
 	if _, ok := c.visited[rawURL]; ok {
 		return
 	}
 
 	baseDomain, err := utils.GetBaseDomain(rawURL)
 	if err != nil {
+		return
+	}
+
+	if allowedDomain != "" && baseDomain != allowedDomain {
 		return
 	}
 
@@ -92,7 +109,7 @@ func (c *Coordinator) AddURL(rawURL string) {
 	host := u.Host
 
 	if _, ok := c.domainQueue[host]; !ok {
-		c.domainQueue[host] = []string{}
+		c.domainQueue[host] = []URLJob{}
 		record := &DomainRecord{
 			Domain:    host,
 			LastCrawl: time.Unix(0, 0),
@@ -101,7 +118,7 @@ func (c *Coordinator) AddURL(rawURL string) {
 		heap.Push(c.history, *record)
 	}
 
-	c.domainQueue[host] = append(c.domainQueue[host], rawURL)
+	c.domainQueue[host] = append(c.domainQueue[host], URLJob{URL: rawURL, Depth: depth, MaxDepth: maxDepth, AllowedDomain: allowedDomain})
 }
 
 func (c *Coordinator) ProcessResult(res CrawlResult) {
@@ -110,7 +127,7 @@ func (c *Coordinator) ProcessResult(res CrawlResult) {
 		return
 	}
 	for _, link := range res.Links {
-		c.AddURL(link)
+		c.AddURL(link, res.Depth+1, res.MaxDepth, res.AllowedDomain)
 	}
 }
 
@@ -130,14 +147,14 @@ func (c *Coordinator) HasWork() bool {
 	return false
 }
 
-func (c *Coordinator) GetNextJob() (string, bool) {
+func (c *Coordinator) GetNextJob() (URLJob, bool) {
 	if c.history.Len() == 0 {
-		return "", false
+		return URLJob{}, false
 	}
 	nextRecord := (*c.history)[0]
 
 	if time.Since(nextRecord.LastCrawl) < c.politeness {
-		return "", false
+		return URLJob{}, false
 	}
 
 	record := heap.Pop(c.history).(DomainRecord)
@@ -153,7 +170,7 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 		return c.GetNextJob()
 	}
 
-	nextUrl := queue[0]
+	nextJob := queue[0]
 	c.domainQueue[record.Domain] = queue[1:]
 
 	record.LastCrawl = time.Now()
@@ -161,7 +178,7 @@ func (c *Coordinator) GetNextJob() (string, bool) {
 	c.domainCounts[baseDomain]++
 
 	heap.Push(c.history, record)
-	return nextUrl, true
+	return nextJob, true
 }
 
 func (c *Coordinator) TimeToNextJob() time.Duration {

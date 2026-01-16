@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
-	"github.com/oranjParker/Rarefactor/internal/crawler/engine"
+	"github.com/oranjParker/Rarefactor/internal/crawler"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/search"
 	"github.com/redis/go-redis/v9"
@@ -15,25 +15,25 @@ import (
 
 type CrawlerServer struct {
 	db  *pgxpool.Pool
-	eng *engine.Engine
+	eng *crawler.Engine
 	qdb *database.QdrantClient
 	emb *search.Embedder
 }
 
 func NewCrawlerServer(db *pgxpool.Pool, rdb *redis.Client, qdb *database.QdrantClient, emb *search.Embedder) *CrawlerServer {
-	eng := engine.NewEngine(db, 50, 2*time.Second, rdb, qdb, emb)
+	eng := crawler.NewEngine(db, 50, 2*time.Second, rdb, qdb, emb)
 	return &CrawlerServer{db: db, eng: eng}
 }
 
 func (c *CrawlerServer) Crawl(ctx context.Context, req *pb.CrawlRequest) (*pb.CrawlResponse, error) {
-	log.Printf("[RPC] Received Crawl Trigger: %s", req.SeedUrl)
+	log.Printf("[RPC] Received Crawl Trigger: %s (mode: %s, max_depth: %d)", req.SeedUrl, req.CrawlMode, req.MaxDepth)
 
 	go func() {
 		// Enforce a hard timeout for background crawls to prevent infinite resource usage
 		crawlCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
 
-		c.eng.Run(crawlCtx, req.SeedUrl, "production-crawl")
+		c.eng.Run(crawlCtx, req.SeedUrl, "production-crawl", int(req.MaxDepth), req.CrawlMode)
 	}()
 
 	return &pb.CrawlResponse{

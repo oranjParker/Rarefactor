@@ -18,6 +18,7 @@ message CrawlRequest {
   string seed_url = 1;
   int32 max_pages = 2;
   int32 max_depth = 3;
+  string crawl_mode = 4; // "broad" or "targeted"
 }
 
 message CrawlResponse {

@@ -1,4 +1,4 @@
-package engine
+package crawler
 
 import (
 	"context"
@@ -13,20 +13,20 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jimsmart/grobotstxt"
-	"github.com/oranjParker/Rarefactor/internal/crawler/actors"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/search"
+	"github.com/oranjParker/Rarefactor/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
 	MaxBodySize    = 2 * 1024 * 1024
-	UserAgent      = "RarefactorBot/1.0"
+	UserAgent      = "RarefactorBot/1.0 (+https://github.com/oranjParker/Rarefactor)"
 	RobotsCacheTTL = 24 * time.Hour
 )
 
 type Engine struct {
-	coordinator  *actors.Coordinator
+	coordinator  *Coordinator
 	concurrency  int
 	dbPool       *pgxpool.Pool
 	redisClient  *redis.Client
@@ -37,26 +37,38 @@ type Engine struct {
 
 func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redisClient *redis.Client,
 	qdb *database.QdrantClient, emb *search.Embedder) *Engine {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.MaxIdleConns = 100
-	transport.IdleConnTimeout = 90 * time.Second
-
 	return &Engine{
 		dbPool:       db,
-		coordinator:  actors.NewCoordinator(politeness),
+		coordinator:  NewCoordinator(politeness),
 		concurrency:  concurrency,
 		redisClient:  redisClient,
 		qdrantClient: qdb,
 		embedder:     emb,
-		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
-		},
+		httpClient: utils.NewSafeHTTPClient(utils.ClientConfig{
+			Timeout:       10 * time.Second,
+			AllowInternal: false,
+		}),
 	}
 }
 
-func (e *Engine) Run(ctx context.Context, seedURL, namespace string) {
-	log.Printf("[Engine] Starting crawl: %s", seedURL)
+func (e *Engine) Run(ctx context.Context, seedURL, namespace string, maxDepth int, crawlMode string) {
+	log.Printf("[Engine] Starting crawl: %s (mode: %s, maxDepth: %d)", seedURL, crawlMode, maxDepth)
+
+	// Determine effective maxDepth and domain restriction based on mode
+	effectiveMaxDepth := maxDepth
+	var allowedDomain string
+
+	if crawlMode == "broad" {
+		effectiveMaxDepth = 2
+	} else if crawlMode == "targeted" {
+		effectiveMaxDepth = 10
+		var err error
+		allowedDomain, err = utils.GetBaseDomain(seedURL)
+		if err != nil {
+			log.Printf("[Engine] Failed to get base domain for targeted crawl: %v", err)
+			return
+		}
+	}
 
 	for i := 0; i < e.concurrency; i++ {
 		go func(id int) {
@@ -64,46 +76,55 @@ func (e *Engine) Run(ctx context.Context, seedURL, namespace string) {
 				select {
 				case <-ctx.Done():
 					return
-				case targetURL, ok := <-e.coordinator.JobsChan:
+				case job, ok := <-e.coordinator.JobsChan:
 					if !ok {
 						return
 					}
 
-					allowed, _ := e.isAllowed(ctx, targetURL)
+					allowed, _ := e.isAllowed(ctx, job.URL)
 					if !allowed {
-						e.coordinator.ResultsChan <- actors.CrawlResult{URL: targetURL, Err: fmt.Errorf("robots not permitted")}
+						e.coordinator.ResultsChan <- CrawlResult{
+							URL:           job.URL,
+							Depth:         job.Depth,
+							MaxDepth:      job.MaxDepth,
+							AllowedDomain: job.AllowedDomain,
+							Err:           fmt.Errorf("robots not permitted"),
+						}
 						continue
 					}
 
-					links, title, content, err := e.fetchAndParse(ctx, targetURL)
+					links, title, content, err := e.fetchAndParse(ctx, job.URL)
 					if err == nil {
-						_ = e.persistDocument(ctx, targetURL, title, content, namespace)
+						_ = e.persistDocument(ctx, job.URL, title, content, namespace)
 					}
 
-					e.coordinator.ResultsChan <- actors.CrawlResult{
-						URL:     targetURL,
-						Links:   links,
-						Title:   title,
-						Content: content,
-						Err:     err,
+					e.coordinator.ResultsChan <- CrawlResult{
+						URL:           job.URL,
+						Depth:         job.Depth,
+						MaxDepth:      job.MaxDepth,
+						AllowedDomain: job.AllowedDomain,
+						Links:         links,
+						Title:         title,
+						Content:       content,
+						Err:           err,
 					}
 				}
 			}
 		}(i)
 	}
 
-	e.coordinator.AddURL(seedURL)
+	e.coordinator.AddURL(seedURL, 0, effectiveMaxDepth, allowedDomain)
 
 	var waitTimer *time.Timer
 
 	for e.coordinator.HasWork() {
-		var jobStream chan string
-		var nextJob string
+		var jobStream chan URLJob
+		var nextJob URLJob
 
-		targetUrl, ok := e.coordinator.GetNextJob()
+		job, ok := e.coordinator.GetNextJob()
 
 		if ok {
-			nextJob = targetUrl
+			nextJob = job
 			jobStream = e.coordinator.JobsChan
 		}
 
@@ -135,9 +156,9 @@ func (e *Engine) fetchAndParse(ctx context.Context, url string) ([]string, strin
 	if err != nil {
 		return nil, "", "", err
 	}
-	req.Header.Set("User-Agent", "RarefactorBot/1.0")
+	req.Header.Set("User-Agent", UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := e.httpClient.Do(req)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -197,14 +218,24 @@ func (e *Engine) isAllowed(ctx context.Context, targetURL string) (bool, error) 
 		return false, err
 	}
 
+	if e.redisClient == nil {
+		return true, nil // No cache, allow by default or fetch every time? Better allow for tests.
+	}
+
 	cacheKey := fmt.Sprintf("robots:%s", u.Host)
 	robotsData, err := e.redisClient.Get(ctx, cacheKey).Result()
 
 	if err == redis.Nil {
 		robotsURL := fmt.Sprintf("%s://%s/robots.txt", u.Scheme, u.Host)
-		resp, err := http.Get(robotsURL)
+		req, err := http.NewRequestWithContext(ctx, "GET", robotsURL, nil)
 		if err != nil {
 			return true, nil
+		}
+		req.Header.Set("User-Agent", UserAgent)
+
+		resp, err := e.httpClient.Do(req)
+		if err != nil {
+			return false, nil
 		}
 		defer resp.Body.Close()
 
@@ -235,6 +266,9 @@ func isLikelyHTML(u string) bool {
 }
 
 func resolveURL(base, relative string) string {
+	if len(relative) > 2048 {
+		return ""
+	}
 	baseURL, err := url.Parse(base)
 	if err != nil {
 		return ""
@@ -243,10 +277,17 @@ func resolveURL(base, relative string) string {
 	if err != nil {
 		return ""
 	}
-	return baseURL.ResolveReference(relURL).String()
+	resolved := baseURL.ResolveReference(relURL).String()
+	if len(resolved) > 2048 {
+		return ""
+	}
+	return resolved
 }
 
 func (e *Engine) persistDocument(ctx context.Context, urlStr, title, content, namespace string) error {
+	if e.dbPool == nil {
+		return nil
+	}
 	query := `
 		INSERT INTO documents (url, domain, title, content, raw_content_size, namespace)
 		VALUES ($1, $2, $3, $4, $5, $6)
