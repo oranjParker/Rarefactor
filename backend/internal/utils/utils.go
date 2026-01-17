@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/net/publicsuffix"
@@ -74,6 +75,10 @@ func IsPrivateIP(ip net.IP) bool {
 	}
 
 	return false
+}
+
+func SanitizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "")
 }
 
 func bytesCompare(a, b []byte) int {

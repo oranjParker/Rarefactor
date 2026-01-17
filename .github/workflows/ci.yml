@@ -1,0 +1,39 @@
+name: Rarefactor CI
+
+on:
+  push:
+    branches: [ main, feature/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test & Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run Tests with Coverage
+        run: |
+          go test ./... -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+
+      - name: Enforce Coverage Threshold
+        run: |
+          # Extract the total coverage percentage
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print substr($3, 1, length($3)-1)}')
+          echo "Total Coverage: $COVERAGE%"
+          
+          if (( $(echo "$COVERAGE < 85" | bc -l) )); then
+            echo "Error: Coverage is below 85% threshold!"
+            exit 1
+          fi

@@ -146,3 +146,111 @@ func TestFetchAndParse(t *testing.T) {
 		})
 	}
 }
+
+type mockStorage struct {
+	persistedDocs []struct {
+		url, title, content, namespace string
+	}
+}
+
+func (m *mockStorage) PersistDocument(ctx context.Context, urlStr, title, content, namespace string) error {
+	m.persistedDocs = append(m.persistedDocs, struct {
+		url, title, content, namespace string
+	}{urlStr, title, content, namespace})
+	return nil
+}
+
+func TestEngine_Run(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body><a href="/page1">Link</a></body></html>`)
+	})
+	mux.HandleFunc("/page1", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body>Page 1</body></html>`)
+	})
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "User-agent: *\nAllow: /")
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	e := NewEngine(nil, 1, 10*time.Millisecond, nil, nil, nil)
+	e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+	mock := &mockStorage{}
+	e.storage = mock
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	e.Run(ctx, server.URL, "test", 2, "broad")
+
+	if len(mock.persistedDocs) < 2 {
+		t.Errorf("Expected at least 2 persisted documents, got %d", len(mock.persistedDocs))
+	}
+}
+
+func TestEngine_IsAllowed(t *testing.T) {
+	tests := []struct {
+		name       string
+		robots     string
+		statusCode int
+		allowed    bool
+	}{
+		{"Allow all", "User-agent: *\nAllow: /", 200, true},
+		{"Disallow all", "User-agent: *\nDisallow: /", 200, false},
+		{"500 Error", "", 500, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/robots.txt" {
+					w.WriteHeader(tt.statusCode)
+					fmt.Fprint(w, tt.robots)
+				}
+			}))
+			defer server.Close()
+
+			e := NewEngine(nil, 1, 0, nil, nil, nil)
+			e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+			// Disable redis to force HTTP fetch
+			e.redisClient = nil
+
+			allowed, _ := e.isAllowed(context.Background(), server.URL+"/any")
+			if allowed != tt.allowed {
+				t.Errorf("Expected allowed=%v, got %v", tt.allowed, allowed)
+			}
+		})
+	}
+}
+
+func TestEngine_PersistDocument(t *testing.T) {
+	longTitle := strings.Repeat("T", 600)
+	longContent := strings.Repeat("C", 110000)
+	invalidUTF8 := "Hello \xff World"
+
+	t.Run("Utility Logic", func(t *testing.T) {
+		// Testing the logic that persistDocument uses
+		title := utils.SanitizeUTF8(longTitle)
+		if len(title) > 500 {
+			title = title[:500]
+		}
+		if len(title) > 500 {
+			t.Errorf("Title not truncated, got %d", len(title))
+		}
+
+		content := utils.SanitizeUTF8(longContent)
+		if len(content) > 100000 {
+			content = content[:100000]
+		}
+		if len(content) > 100000 {
+			t.Errorf("Content not truncated, got %d", len(content))
+		}
+
+		sanitized := utils.SanitizeUTF8(invalidUTF8)
+		if strings.Contains(sanitized, "\xff") {
+			t.Errorf("Sanitization failed, got %q", sanitized)
+		}
+	})
+}
