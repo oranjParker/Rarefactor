@@ -25,6 +25,14 @@ const (
 	RobotsCacheTTL = 24 * time.Hour
 )
 
+type DocumentStorage interface {
+	PersistDocument(ctx context.Context, urlStr, title, content, namespace string) error
+}
+
+type EngineRunner interface {
+	Run(ctx context.Context, seedURL, namespace string, maxDepth int, crawlMode string)
+}
+
 type Engine struct {
 	coordinator  *Coordinator
 	concurrency  int
@@ -33,11 +41,12 @@ type Engine struct {
 	qdrantClient *database.QdrantClient
 	embedder     *search.Embedder
 	httpClient   *http.Client
+	storage      DocumentStorage
 }
 
 func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redisClient *redis.Client,
 	qdb *database.QdrantClient, emb *search.Embedder) *Engine {
-	return &Engine{
+	e := &Engine{
 		dbPool:       db,
 		coordinator:  NewCoordinator(politeness),
 		concurrency:  concurrency,
@@ -49,6 +58,8 @@ func NewEngine(db *pgxpool.Pool, concurrency int, politeness time.Duration, redi
 			AllowInternal: false,
 		}),
 	}
+	e.storage = e // Engine implements DocumentStorage
+	return e
 }
 
 func (e *Engine) Run(ctx context.Context, seedURL, namespace string, maxDepth int, crawlMode string) {
@@ -95,7 +106,7 @@ func (e *Engine) Run(ctx context.Context, seedURL, namespace string, maxDepth in
 
 					links, title, content, err := e.fetchAndParse(ctx, job.URL)
 					if err == nil {
-						_ = e.persistDocument(ctx, job.URL, title, content, namespace)
+						_ = e.storage.PersistDocument(ctx, job.URL, title, content, namespace)
 					}
 
 					e.coordinator.ResultsChan <- CrawlResult{
@@ -218,14 +229,17 @@ func (e *Engine) isAllowed(ctx context.Context, targetURL string) (bool, error) 
 		return false, err
 	}
 
-	if e.redisClient == nil {
-		return true, nil // No cache, allow by default or fetch every time? Better allow for tests.
+	cacheKey := fmt.Sprintf("robots:%s", u.Host)
+	var robotsData string
+	var rerr error
+
+	if e.redisClient != nil {
+		robotsData, rerr = e.redisClient.Get(ctx, cacheKey).Result()
+	} else {
+		rerr = redis.Nil
 	}
 
-	cacheKey := fmt.Sprintf("robots:%s", u.Host)
-	robotsData, err := e.redisClient.Get(ctx, cacheKey).Result()
-
-	if err == redis.Nil {
+	if rerr == redis.Nil {
 		robotsURL := fmt.Sprintf("%s://%s/robots.txt", u.Scheme, u.Host)
 		req, err := http.NewRequestWithContext(ctx, "GET", robotsURL, nil)
 		if err != nil {
@@ -239,15 +253,23 @@ func (e *Engine) isAllowed(ctx context.Context, targetURL string) (bool, error) 
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode >= 500 {
+			return false, nil // Fail-closed on server error
+		}
+
 		if resp.StatusCode == 404 {
-			e.redisClient.Set(ctx, cacheKey, "", time.Hour)
+			if e.redisClient != nil {
+				e.redisClient.Set(ctx, cacheKey, "", time.Hour)
+			}
 			return true, nil
 		}
 
 		body, _ := io.ReadAll(resp.Body)
 		robotsData = string(body)
-		e.redisClient.Set(ctx, cacheKey, robotsData, RobotsCacheTTL)
-	} else if err != nil {
+		if e.redisClient != nil {
+			e.redisClient.Set(ctx, cacheKey, robotsData, RobotsCacheTTL)
+		}
+	} else if rerr != nil {
 		return true, nil // Fallback
 	}
 
@@ -270,7 +292,7 @@ func resolveURL(base, relative string) string {
 		return ""
 	}
 	baseURL, err := url.Parse(base)
-	if err != nil {
+	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return ""
 	}
 	relURL, err := url.Parse(relative)
@@ -282,6 +304,10 @@ func resolveURL(base, relative string) string {
 		return ""
 	}
 	return resolved
+}
+
+func (e *Engine) PersistDocument(ctx context.Context, urlStr, title, content, namespace string) error {
+	return e.persistDocument(ctx, urlStr, title, content, namespace)
 }
 
 func (e *Engine) persistDocument(ctx context.Context, urlStr, title, content, namespace string) error {
@@ -299,6 +325,16 @@ func (e *Engine) persistDocument(ctx context.Context, urlStr, title, content, na
 	`
 
 	u, _ := url.Parse(urlStr)
+
+	// Truncate and sanitize title and content
+	title = utils.SanitizeUTF8(title)
+	if len(title) > 500 {
+		title = title[:500]
+	}
+	content = utils.SanitizeUTF8(content)
+	if len(content) > 100000 {
+		content = content[:100000]
+	}
 
 	_, err := e.dbPool.Exec(ctx, query,
 		urlStr,

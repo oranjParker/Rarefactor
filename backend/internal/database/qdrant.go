@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
@@ -83,16 +82,7 @@ func (q *QdrantClient) EnsureCollection(ctx context.Context, name string) error 
 	})
 }
 
-func SanitizeUTF8(s string) string {
-	if utf8.ValidString(s) {
-		return s
-	}
-	// Replace invalid sequences with the Unicode replacement character
-	return strings.ToValidUTF8(s, "")
-}
-
 func (q *QdrantClient) Upsert(ctx context.Context, collection, url, title, snippet string, vector []float32) error {
-	sanitizedContent := SanitizeUTF8(snippet)
 	id := uuid.NewMD5(uuid.NameSpaceURL, []byte(url)).String()
 
 	_, err := q.Client.Upsert(ctx, &qdrant.UpsertPoints{
@@ -104,7 +94,7 @@ func (q *QdrantClient) Upsert(ctx context.Context, collection, url, title, snipp
 				Payload: qdrant.NewValueMap(map[string]any{
 					"url":     url,
 					"title":   title,
-					"snippet": sanitizedContent,
+					"snippet": snippet,
 				}),
 			},
 		},

@@ -2,88 +2,174 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
+	"github.com/oranjParker/Rarefactor/internal/crawler"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/search"
-	"github.com/oranjParker/Rarefactor/internal/server"
 	"github.com/oranjParker/Rarefactor/internal/utils"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/reflection"
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	pool, err := database.NewPool(ctx)
-	if err != nil {
-		log.Fatalf("Failed to connect to Postgres: %v", err)
+	if err := run(ctx); err != nil {
+		log.Fatalf("Application failed: %v", err)
 	}
-	defer pool.Close()
+}
 
-	rdb, err := database.NewRedisClient(ctx)
+type AppDependencies struct {
+	Pool     *pgxpool.Pool
+	Redis    *redis.Client
+	Qdrant   *database.QdrantClient
+	Embedder *search.Embedder
+}
+
+func run(ctx context.Context) error {
+	deps, err := setupDependencies(ctx)
 	if err != nil {
-		log.Fatalf("Redis failed to initialize: %v", err)
+		return err
 	}
-	defer rdb.Close()
+	if deps.Pool != nil {
+		defer deps.Pool.Close()
+	}
+	if deps.Redis != nil {
+		defer deps.Redis.Close()
+	}
+	if deps.Qdrant != nil {
+		defer deps.Qdrant.Close()
+	}
 
-	qdb, err := database.NewQdrantClient(ctx)
+	return runWithDeps(ctx, deps)
+}
+
+func setupDependencies(ctx context.Context) (*AppDependencies, error) {
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
+
+	pool, err := database.NewPool(initCtx)
 	if err != nil {
-		log.Fatalf("Qdrant failed: %v", err)
+		return nil, fmt.Errorf("postgres init: %w", err)
 	}
-	defer qdb.Close()
 
-	if err := qdb.EnsureCollection(ctx, "documents"); err != nil {
+	rdb, err := database.NewRedisClient(initCtx)
+	if err != nil {
+		if pool != nil {
+			pool.Close()
+		}
+		return nil, fmt.Errorf("redis init: %w", err)
+	}
+
+	qdb, err := database.NewQdrantClient(initCtx)
+	if err != nil {
+		if pool != nil {
+			pool.Close()
+		}
+		if rdb != nil {
+			rdb.Close()
+		}
+		return nil, fmt.Errorf("qdrant init: %w", err)
+	}
+
+	if err := qdb.EnsureCollection(initCtx, "documents"); err != nil {
 		log.Printf("Warning: Qdrant collection setup: %v", err)
 	}
 
 	embedder := search.NewEmbedder()
 
-	lis, err := net.Listen("tcp", ":50051")
+	return &AppDependencies{
+		Pool:     pool,
+		Redis:    rdb,
+		Qdrant:   qdb,
+		Embedder: embedder,
+	}, nil
+}
+
+func runWithDeps(ctx context.Context, deps *AppDependencies) error {
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		grpcPort = "50051"
+	}
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = "8000"
+	}
+
+	lis, err := net.Listen("tcp", ":"+grpcPort)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		return fmt.Errorf("failed to listen on :%s: %w", grpcPort, err)
 	}
 
 	grpcServer := grpc.NewServer()
-	searchSrv := server.NewSearchServer(pool, rdb, qdb, embedder)
 
+	searchSrv := search.NewSearchServer(deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
 	pb.RegisterSearchEngineServiceServer(grpcServer, searchSrv)
 
-	crawlerSrv := server.NewCrawlerServer(pool, rdb, qdb, embedder)
+	crawlerSrv := crawler.NewCrawlerServer(ctx, deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
 	pb.RegisterCrawlerServiceServer(grpcServer, crawlerSrv)
 
-	go func() {
-		log.Println("Starting gRPC server on :50051")
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Fatalf("failed to serve gRPC: %v", err)
-		}
-	}()
+	reflection.Register(grpcServer)
 
-	// 4. Start gRPC-Gateway (HTTP/1.1 Proxy)
 	mux := runtime.NewServeMux()
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 
-	err = pb.RegisterCrawlerServiceHandlerFromEndpoint(ctx, mux, "localhost:50051", opts)
-	if err != nil {
-		log.Fatalf("Failed to register Search Gateway: %v", err)
+	if err := pb.RegisterCrawlerServiceHandlerFromEndpoint(ctx, mux, "localhost:"+grpcPort, opts); err != nil {
+		return fmt.Errorf("failed to register Crawler Gateway: %w", err)
 	}
-	err = pb.RegisterSearchEngineServiceHandlerFromEndpoint(ctx, mux, "localhost:50051", opts)
-	if err != nil {
-		log.Fatalf("Failed to register Search Gateway: %v", err)
+	if err := pb.RegisterSearchEngineServiceHandlerFromEndpoint(ctx, mux, "localhost:"+grpcPort, opts); err != nil {
+		return fmt.Errorf("failed to register Search Gateway: %w", err)
 	}
 
 	httpServer := &http.Server{
-		Addr:    ":8000",
+		Addr:    ":" + httpPort,
 		Handler: utils.AllowCORS(mux),
 	}
-	log.Println("Starting HTTP Gateway on :8000")
-	if err := httpServer.ListenAndServe(); err != nil {
-		log.Fatalf("failed to serve Gateway: %v", err)
+
+	errChan := make(chan error, 2)
+
+	go func() {
+		log.Printf("Starting gRPC server on :%s\n", grpcPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			errChan <- fmt.Errorf("grpc server error: %w", err)
+		}
+	}()
+
+	go func() {
+		log.Printf("Starting HTTP Gateway on :%s\n", httpPort)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- fmt.Errorf("http gateway error: %w", err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Println("Shutting down servers...")
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+
+		grpcServer.GracefulStop()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("http shutdown error: %w", err)
+		}
+		return nil
+
+	case err := <-errChan:
+		return err
 	}
 }
