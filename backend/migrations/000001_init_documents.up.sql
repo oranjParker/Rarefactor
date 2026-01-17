@@ -3,18 +3,18 @@ CREATE TABLE IF NOT EXISTS documents (
     url TEXT UNIQUE NOT NULL,
     domain TEXT NOT NULL,
     title TEXT,
-    content TEXT NOT NULL,          -- Cleaned text for the search engine
-    raw_content_size INT,           -- Auditing crawler efficiency
+    content TEXT NOT NULL,
+    raw_content_size INT,
     crawled_at TIMESTAMPTZ DEFAULT NOW(),
 
-    -- Generic Categorization
-    namespace TEXT NOT NULL,        -- e.g., 'finance', 'tech', 'general'
-    tags TEXT[],                    -- Searchable array of strings
+    namespace TEXT NOT NULL,
+    tags TEXT[],
 
-    -- Linkage
-    vector_id UUID UNIQUE,          -- For Qdrant indexing
-    metadata JSONB DEFAULT '{}'     -- Catch-all for extra data
+    vector_id UUID UNIQUE,
+    metadata JSONB DEFAULT '{}'
 );
 
-CREATE INDEX idx_docs_namespace ON documents(namespace);
-CREATE INDEX idx_docs_url ON documents(url);
+CREATE INDEX IF NOT EXISTS idx_docs_namespace ON documents(namespace);
+CREATE INDEX IF NOT EXISTS idx_docs_url ON documents(url);
+CREATE INDEX IF NOT EXISTS idx_docs_domain ON documents(domain);
+CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON documents(crawled_at DESC);
