@@ -1,4 +1,4 @@
-package server
+package search
 
 import (
 	"cmp"
@@ -11,8 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
-	"github.com/oranjParker/Rarefactor/internal/database"
-	"github.com/oranjParker/Rarefactor/internal/search"
+	"github.com/qdrant/go-client/qdrant"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,11 +21,19 @@ const (
 	CollectionName        = "documents"
 )
 
+type VectorDatabase interface {
+	Query(ctx context.Context, collection string, vector []float32, limit uint64) ([]*qdrant.ScoredPoint, error)
+}
+
+type TextEmbedder interface {
+	ComputeEmbeddings(ctx context.Context, text string, isQuery bool) ([]float32, error)
+}
+
 type SearchServer struct {
 	dbPool   *pgxpool.Pool
 	rdb      *redis.Client
-	qdb      *database.QdrantClient
-	embedder *search.Embedder
+	qdb      VectorDatabase
+	embedder TextEmbedder
 }
 
 type scoredTerm struct {
@@ -34,7 +41,7 @@ type scoredTerm struct {
 	score float64
 }
 
-func NewSearchServer(db *pgxpool.Pool, rdb *redis.Client, qdb *database.QdrantClient, emb *search.Embedder) *SearchServer {
+func NewSearchServer(db *pgxpool.Pool, rdb *redis.Client, qdb VectorDatabase, emb TextEmbedder) *SearchServer {
 	return &SearchServer{
 		dbPool:   db,
 		rdb:      rdb,
@@ -133,9 +140,18 @@ func (s *SearchServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.S
 	results := make([]*pb.Document, 0, len(points))
 	for _, p := range points {
 		payload := p.GetPayload()
+		url := ""
+		if val, ok := payload["url"]; ok {
+			url = val.GetStringValue()
+		}
+		title := ""
+		if val, ok := payload["title"]; ok {
+			title = val.GetStringValue()
+		}
+
 		results = append(results, &pb.Document{
-			Url:   payload["url"].GetStringValue(),
-			Title: payload["title"].GetStringValue(),
+			Url:   url,
+			Title: title,
 			Score: p.GetScore(),
 		})
 	}
@@ -146,7 +162,5 @@ func (s *SearchServer) Search(ctx context.Context, req *pb.SearchRequest) (*pb.S
 }
 
 func (s *SearchServer) UpdateDocument(ctx context.Context, req *pb.UpdateDocumentRequest) (*pb.Document, error) {
-	// s.rdb.ZAdd(ctx, AutocompleteKey, redis.Z{Member: req.Document.Title, Score: 0})
-
 	return req.Document, nil
 }
