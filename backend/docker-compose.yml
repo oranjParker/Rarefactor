@@ -55,6 +55,7 @@ services:
         aliases:
             - embeddings
 
+# For development on Apple Silicon
   embeddings-cpu:
     image: michaelf34/infinity:latest
     profiles: ["cpu"]

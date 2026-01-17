@@ -1,4 +1,4 @@
-package server
+package crawler
 
 import (
 	"context"
@@ -26,7 +26,11 @@ func (m *mockEngine) Run(ctx context.Context, seedURL, namespace string, maxDept
 
 func TestCrawl_Defaults(t *testing.T) {
 	mock := &mockEngine{called: make(chan struct{})}
-	s := &CrawlerServer{eng: mock}
+
+	s := &CrawlerServer{
+		eng:       mock,
+		serverCtx: context.Background(),
+	}
 
 	req := &pb.CrawlRequest{
 		SeedUrl: "http://go.dev",
@@ -53,7 +57,10 @@ func TestCrawl_Defaults(t *testing.T) {
 
 func TestCrawl_Explicit(t *testing.T) {
 	mock := &mockEngine{called: make(chan struct{})}
-	s := &CrawlerServer{eng: mock}
+	s := &CrawlerServer{
+		eng:       mock,
+		serverCtx: context.Background(),
+	}
 
 	req := &pb.CrawlRequest{
 		SeedUrl:   "http://example.com",
@@ -77,5 +84,18 @@ func TestCrawl_Explicit(t *testing.T) {
 	}
 	if mock.lastCrawlMode != "targeted" {
 		t.Errorf("Expected mode 'targeted', got %q", mock.lastCrawlMode)
+	}
+}
+
+func TestNewCrawlerServer(t *testing.T) {
+	srv := NewCrawlerServer(context.Background(), nil, nil, nil, nil)
+	if srv == nil {
+		t.Fatal("Expected non-nil server")
+	}
+	if srv.eng == nil {
+		t.Error("Expected engine to be initialized")
+	}
+	if srv.serverCtx == nil {
+		t.Error("Expected serverCtx to be set")
 	}
 }

@@ -1,4 +1,4 @@
-package server
+package search
 
 import (
 	"context"
@@ -111,5 +111,47 @@ func TestSearch(t *testing.T) {
 	}
 	if score != 1.0 {
 		t.Errorf("Expected score 1.0 for new query, got %f", score)
+	}
+}
+
+func TestAutocomplete_Empty(t *testing.T) {
+	mr, _ := miniredis.Run()
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	srv := NewSearchServer(nil, rdb, nil, nil)
+
+	req := &pb.AutocompleteRequest{Prefix: "  "}
+	resp, _ := srv.Autocomplete(context.Background(), req)
+	if len(resp.Suggestions) != 0 {
+		t.Error("Expected 0 suggestions for empty prefix")
+	}
+
+	req = &pb.AutocompleteRequest{Prefix: "none"}
+	resp, _ = srv.Autocomplete(context.Background(), req)
+	if len(resp.Suggestions) != 0 {
+		t.Error("Expected 0 suggestions for unknown prefix")
+	}
+}
+
+func TestUpdateDocument(t *testing.T) {
+	srv := &SearchServer{}
+	doc := &pb.Document{Url: "http://test.com", Title: "Test"}
+	resp, err := srv.UpdateDocument(context.Background(), &pb.UpdateDocumentRequest{Document: doc})
+	if err != nil {
+		t.Fatalf("UpdateDocument failed: %v", err)
+	}
+	if resp.Url != doc.Url {
+		t.Errorf("Expected URL %s, got %s", doc.Url, resp.Url)
+	}
+}
+
+func TestSearch_Empty(t *testing.T) {
+	srv := &SearchServer{}
+	resp, err := srv.Search(context.Background(), &pb.SearchRequest{Query: ""})
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if len(resp.Results) != 0 {
+		t.Error("Expected 0 results for empty query")
 	}
 }

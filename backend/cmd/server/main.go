@@ -14,9 +14,9 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/jackc/pgx/v5/pgxpool"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
+	"github.com/oranjParker/Rarefactor/internal/crawler"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/search"
-	"github.com/oranjParker/Rarefactor/internal/server"
 	"github.com/oranjParker/Rarefactor/internal/utils"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -116,10 +116,11 @@ func runWithDeps(ctx context.Context, deps *AppDependencies) error {
 	}
 
 	grpcServer := grpc.NewServer()
-	searchSrv := server.NewSearchServer(deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
+
+	searchSrv := search.NewSearchServer(deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
 	pb.RegisterSearchEngineServiceServer(grpcServer, searchSrv)
 
-	crawlerSrv := server.NewCrawlerServer(deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
+	crawlerSrv := crawler.NewCrawlerServer(ctx, deps.Pool, deps.Redis, deps.Qdrant, deps.Embedder)
 	pb.RegisterCrawlerServiceServer(grpcServer, crawlerSrv)
 
 	reflection.Register(grpcServer)

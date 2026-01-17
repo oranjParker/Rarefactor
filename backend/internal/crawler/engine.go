@@ -292,7 +292,7 @@ func resolveURL(base, relative string) string {
 		return ""
 	}
 	baseURL, err := url.Parse(base)
-	if err != nil {
+	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
 		return ""
 	}
 	relURL, err := url.Parse(relative)

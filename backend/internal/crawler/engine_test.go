@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/oranjParker/Rarefactor/internal/utils"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestFetchAndParse(t *testing.T) {
@@ -225,32 +228,204 @@ func TestEngine_IsAllowed(t *testing.T) {
 	}
 }
 
-func TestEngine_PersistDocument(t *testing.T) {
-	longTitle := strings.Repeat("T", 600)
-	longContent := strings.Repeat("C", 110000)
-	invalidUTF8 := "Hello \xff World"
+func TestResolveURL(t *testing.T) {
+	tests := []struct {
+		base     string
+		rel      string
+		expected string
+	}{
+		{"http://example.com", "/a", "http://example.com/a"},
+		{"http://example.com/b", "c", "http://example.com/c"},
+		{"http://example.com", "http://other.com", "http://other.com"},
+		{"invalid-base", "/a", ""},
+		{"http://example.com", " :invalid-rel", ""},
+		{"http://example.com", strings.Repeat("a", 3000), ""},
+	}
 
-	t.Run("Utility Logic", func(t *testing.T) {
-		// Testing the logic that persistDocument uses
-		title := utils.SanitizeUTF8(longTitle)
-		if len(title) > 500 {
-			title = title[:500]
+	for _, tt := range tests {
+		got := resolveURL(tt.base, tt.rel)
+		if got != tt.expected {
+			t.Errorf("resolveURL(%q, %q) = %q, want %q", tt.base, tt.rel, got, tt.expected)
 		}
-		if len(title) > 500 {
-			t.Errorf("Title not truncated, got %d", len(title))
-		}
+	}
+}
 
-		content := utils.SanitizeUTF8(longContent)
-		if len(content) > 100000 {
-			content = content[:100000]
-		}
-		if len(content) > 100000 {
-			t.Errorf("Content not truncated, got %d", len(content))
-		}
+func TestIsLikelyHTML(t *testing.T) {
+	tests := []struct {
+		url      string
+		expected bool
+	}{
+		{"http://example.com/index.html", true},
+		{"http://example.com/image.jpg", false},
+		{"http://example.com/doc.pdf", false},
+		{"http://example.com/path", true},
+		{"ftp://example.com", false},
+	}
 
-		sanitized := utils.SanitizeUTF8(invalidUTF8)
-		if strings.Contains(sanitized, "\xff") {
-			t.Errorf("Sanitization failed, got %q", sanitized)
+	for _, tt := range tests {
+		got := isLikelyHTML(tt.url)
+		if got != tt.expected {
+			t.Errorf("isLikelyHTML(%q) = %v, want %v", tt.url, got, tt.expected)
 		}
+	}
+}
+
+func TestEngine_Run_Targeted(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body><a href="http://other.com">Other</a><a href="/page1">Same</a></body></html>`)
 	})
+	mux.HandleFunc("/page1", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body>Page 1</body></html>`)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	e := NewEngine(nil, 1, 0, nil, nil, nil)
+	e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+	mock := &mockStorage{}
+	e.storage = mock
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	e.Run(ctx, server.URL, "test", 2, "targeted")
+
+	for _, doc := range mock.persistedDocs {
+		if strings.Contains(doc.url, "other.com") {
+			t.Errorf("Targeted crawl should not have persisted other.com, got %s", doc.url)
+		}
+	}
+}
+
+func TestEngine_IsAllowed_More(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	e := NewEngine(nil, 1, 0, nil, nil, nil)
+	e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+
+	// 404 Case
+	allowed, _ := e.isAllowed(context.Background(), server.URL+"/any")
+	if !allowed {
+		t.Error("Expected allowed=true for 404 robots.txt")
+	}
+
+	// Invalid URL
+	allowed, _ = e.isAllowed(context.Background(), "::invalid")
+	if allowed {
+		t.Error("Expected allowed=false for invalid URL (fail-closed)")
+	}
+}
+
+func TestEngine_IsAllowed_Redis(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	e := NewEngine(nil, 1, 0, rdb, nil, nil)
+	e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+
+	ctx := context.Background()
+	targetHost := "example.com"
+	targetURL := "http://" + targetHost + "/allowed"
+
+	// 1. Initially not in redis, should fetch
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "User-agent: *\nDisallow: /blocked")
+	}))
+	defer server.Close()
+
+	// Adjust targetURL to use test server
+	u, _ := url.Parse(server.URL)
+	targetURL = server.URL + "/allowed"
+
+	allowed, err := e.isAllowed(ctx, targetURL)
+	if err != nil || !allowed {
+		t.Errorf("Expected allowed, got %v, err: %v", allowed, err)
+	}
+
+	// 2. Should be in redis now
+	cacheKey := fmt.Sprintf("robots:%s", u.Host)
+	val, err := rdb.Get(ctx, cacheKey).Result()
+	if err != nil || !strings.Contains(val, "Disallow: /blocked") {
+		t.Errorf("Robots data not cached in redis correctly: %v", val)
+	}
+
+	// 3. Test disallowed path from cache
+	allowed, _ = e.isAllowed(ctx, server.URL+"/blocked")
+	if allowed {
+		t.Error("Expected disallowed for /blocked")
+	}
+
+	// 4. Test 404 caching
+	mr.FlushAll()
+	server404 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server404.Close()
+
+	u404, _ := url.Parse(server404.URL)
+	allowed, _ = e.isAllowed(ctx, server404.URL+"/any")
+	if !allowed {
+		t.Error("Expected allowed for 404 robots.txt")
+	}
+
+	cacheKey404 := fmt.Sprintf("robots:%s", u404.Host)
+	val404, _ := rdb.Get(ctx, cacheKey404).Result()
+	if val404 != "" {
+		t.Errorf("Expected empty string in cache for 404, got %q", val404)
+	}
+}
+
+func TestEngine_PersistDocument_NoDB(t *testing.T) {
+	e := NewEngine(nil, 1, 0, nil, nil, nil)
+	err := e.PersistDocument(context.Background(), "http://example.com", "Title", "Content", "ns")
+	if err != nil {
+		t.Errorf("Expected nil error when dbPool is nil, got %v", err)
+	}
+}
+
+func TestEngine_Run_ModeBroad(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<html><body><a href="/page1">Link</a></body></html>`)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	e := NewEngine(nil, 1, 0, nil, nil, nil)
+	e.httpClient = utils.NewSafeHTTPClient(utils.ClientConfig{AllowInternal: true})
+	mock := &mockStorage{}
+	e.storage = mock
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	e.Run(ctx, server.URL, "test", 10, "broad")
+	// broad mode should force maxDepth to 2
+	for _, doc := range mock.persistedDocs {
+		// Just verify it ran
+		if doc.url == server.URL {
+			return
+		}
+	}
+	t.Error("Engine did not run in broad mode")
+}
+
+func TestEngine_Run_InvalidSeed(t *testing.T) {
+	e := NewEngine(nil, 1, 0, nil, nil, nil)
+	// Targeted mode with invalid seed URL
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	e.Run(ctx, ":invalid", "test", 10, "targeted")
+	// Should return early
 }
