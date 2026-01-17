@@ -27,6 +27,9 @@ jobs:
         uses: bufbuild/buf-setup-action@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update Buf Dependencies
+        run: buf dep update
+        working-directory: .
 
       - name: Generate Protobuf
         run: buf generate
