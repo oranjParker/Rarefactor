@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
+      - name: Tidy go modules
+        run: go mod tidy
+
       - name: Run Tests with Coverage
         run: |
           go test -coverprofile=coverage.out ./internal/crawler ./internal/search ./internal/utils
