@@ -5,7 +5,13 @@
 Rarefactor is a high-performance search engine and crawler architecture, recently refactored from a Python MVP into a Go-based system. It features a modern React (Vite + TypeScript + Tailwind CSS v3) client.
 
 ## Project Status
-Rarefactor is currently in Phase 1: High-Quality Foundation. We have successfully refactored the Python MVP into a high-performance Go-based architecture. For a detailed look at future phases, see the [ROADMAP.md](./ROADMAP.md).
+Rarefactor is currently in Phase 2: Observability & Resilience. We have successfully refactored the Python MVP into a high-performance Go-based architecture, integrated Qdrant for semantic search powered by local embeddings from the `nomic-embed-text-v1.5` Matryoshka Embedding Model. In Phase 2, we will be implementing a control plane to track execution history & enable Pause/Resume/Stop operations on the crawl, creating a dedicated frontend for controlling the crawler and tracking progress/URL discovery.
+
+For a detailed look at future phases, see the [ROADMAP.md](./ROADMAP.md).
+
+## Sub-application READMEs
+- See [backend/README.md](./backend/README.md) for backend technologies, architecture, and endpoints.
+- See [client/README.md](./client/README.md) for frontend stack (React + Vite + Tailwind), components, and scripts.
 
 ## Getting Started
 
@@ -52,7 +58,7 @@ graph TD
     SearchSvc -.->|4. Contextual Results| GW
 ```
 ### Prerequisites
-- Go 1.21+
+- Go 1.25+
 - Node.js 18+
 - Docker & Docker Compose
 
@@ -83,8 +89,3 @@ To trigger an initial crawl, use the following `Invoke-RestMethod` command (Powe
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:8000/v1/crawl" -Body '{"seed_url": ["https://example.com"]}'
 ```
-
-## Sub-application READMEs
-- See [backend/README.md](./backend/README.md) for backend technologies, architecture, and endpoints.
-- See [client/README.md](./client/README.md) for frontend stack (React + Vite + Tailwind), components, and scripts.
-
