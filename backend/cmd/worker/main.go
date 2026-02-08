@@ -50,25 +50,58 @@ func main() {
 	pgSink := sink.NewPostgresSink(deps.Postgres, 50, 5*time.Second)
 	defer pgSink.Close()
 
-	smartCrawler := processor.NewSmartCrawlerProcessor()
+	linkSink := sink.NewNatsSink(deps.Nats.JS, "crawl.jobs")
+	qdrantSink := sink.NewQdrantSink(deps.Qdrant, "documents")
 
-	runner := core.NewPipelineRunner(natsSrc, pgSink, core.PipelineConfig{
-		Concurrency: 5,
-		Name:        "Rarefactor-V2-Worker",
-	})
+	runner := core.NewGraphRunner("Rarefactor-V2", natsSrc, 10)
 
-	runner.AddProcessor(processor.NewPolitenessProcessor(deps.Redis, "RarefactorBot/2.0", 2, 1000))
-	runner.AddProcessor(smartCrawler)
-	runner.AddProcessor(processor.NewDiscoveryProcessor(sink.NewNatsSink(deps.Nats.JS, "crawl.jobs")))
-	runner.AddProcessor(processor.NewSecurityProcessor(false))
-	runner.AddProcessor(processor.NewChunkerProcessor(1000, 200))
-	runner.AddProcessor(processor.NewEnrichmentProcessor())
-	runner.AddProcessor(processor.NewMetadataProcessor(llmProvider))
-	runner.AddProcessor(processor.NewVectorForkProcessor(sink.NewNatsSink(deps.Nats.JS, "vector.jobs")))
+	if err := runner.AddProcessor("start", processor.NewPolitenessProcessor(deps.Redis, "RarefactorBot/2.0", 3, 1000)); err != nil {
+		log.Fatalf("Failed to add node 'start': %v", err)
+	}
+	if err := runner.AddProcessor("crawler", processor.NewSmartCrawlerProcessor()); err != nil {
+		log.Fatalf("Failed to add node 'crawler': %v", err)
+	}
+	if err := runner.AddHybrid("discovery", processor.NewDiscoveryProcessor(), linkSink); err != nil {
+		log.Fatalf("Failed to add node 'discovery': %v", err)
+	}
+	if err := runner.AddProcessor("security", processor.NewSecurityProcessor(false)); err != nil { // false = don't fail, just flag
+		log.Fatalf("Failed to add node 'security': %v", err)
+	}
+	if err := runner.AddProcessor("chunker", processor.NewChunkerProcessor(1000, 200)); err != nil {
+		log.Fatalf("Failed to add node 'chunker': %v", err)
+	}
+	if err := runner.AddProcessor("enrichment", processor.NewEnrichmentProcessor()); err != nil {
+		log.Fatalf("Failed to add node 'enrichment': %v", err)
+	}
+	if err := runner.AddProcessor("metadata", processor.NewMetadataProcessor(llmProvider)); err != nil {
+		log.Fatalf("Failed to add node 'metadata': %v", err)
+	}
+	if err := runner.AddSink("persist_pg", pgSink); err != nil {
+		log.Fatalf("Failed to add node 'persist_pg': %v", err)
+	}
+	if err := runner.AddHybrid("embedding", processor.NewEmbeddingProcessor(os.Getenv("EMBEDDING_URL")), qdrantSink); err != nil {
+		log.Fatalf("Failed to add node 'embedding': %v", err)
+	}
 
-	log.Println("Worker ready. Awaiting jobs...")
+	if err := runner.Connect("start", "crawler"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("crawler", "discovery"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("crawler", "security"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+
+	runner.Connect("security", "chunker")
+	runner.Connect("chunker", "enrichment")
+	runner.Connect("enrichment", "metadata")
+	runner.Connect("metadata", "persist_pg")
+	runner.Connect("metadata", "embedding")
+
+	log.Println("[Graph] Worker Topology constructed. Starting engine...")
 	if err := runner.Run(ctx); err != nil {
-		log.Printf("Worker exited: %v", err)
+		log.Printf("Worker stopped: %v", err)
 	}
 }
 

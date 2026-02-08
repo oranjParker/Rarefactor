@@ -13,7 +13,7 @@ import (
 
 type DiscoveryProcessor struct{}
 
-func NewDiscoveryProcessor(sink core.Sink[*core.Document[string]]) *DiscoveryProcessor {
+func NewDiscoveryProcessor() *DiscoveryProcessor {
 	return &DiscoveryProcessor{}
 }
 

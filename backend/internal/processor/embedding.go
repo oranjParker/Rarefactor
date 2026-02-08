@@ -34,13 +34,17 @@ func NewEmbeddingProcessor(endpoint string) *EmbeddingProcessor {
 }
 
 func (p *EmbeddingProcessor) Process(ctx context.Context, doc *core.Document[string]) ([]*core.Document[string], error) {
-	textToEmbed := doc.CleanedContent
+	newDoc := doc.Clone()
+	if newDoc.Metadata == nil {
+		newDoc.Metadata = make(map[string]any)
+	}
+	textToEmbed := newDoc.CleanedContent
 	if textToEmbed == "" {
-		textToEmbed = doc.Content
+		textToEmbed = newDoc.Content
 	}
 
 	if textToEmbed == "" {
-		return []*core.Document[string]{doc}, nil
+		return []*core.Document[string]{newDoc}, nil
 	}
 
 	reqBody, _ := json.Marshal(EmbeddingRequest{Text: textToEmbed})
@@ -65,10 +69,7 @@ func (p *EmbeddingProcessor) Process(ctx context.Context, doc *core.Document[str
 		return nil, fmt.Errorf("failed to decode embedding: %w", err)
 	}
 
-	if doc.Metadata == nil {
-		doc.Metadata = make(map[string]any)
-	}
-	doc.Metadata["vector"] = embResp.Embedding
+	newDoc.Metadata["vector"] = embResp.Embedding
 
-	return []*core.Document[string]{doc}, nil
+	return []*core.Document[string]{newDoc}, nil
 }

@@ -27,6 +27,7 @@ func (p *SPACrawlerProcessor) Process(ctx context.Context, doc *core.Document[st
 		chromedp.NoSandbox,
 		chromedp.Headless,
 		chromedp.DisableGPU,
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 	)
 	allocCtx, cancel := chromedp.NewExecAllocator(ctx, opts...)
 	defer cancel()
@@ -37,15 +38,20 @@ func (p *SPACrawlerProcessor) Process(ctx context.Context, doc *core.Document[st
 	taskCtx, cancel = context.WithTimeout(taskCtx, p.Timeout)
 	defer cancel()
 
+	newDoc := doc.Clone()
+	if newDoc.Metadata == nil {
+		newDoc.Metadata = make(map[string]any)
+	}
+
 	var html string
 	err := chromedp.Run(taskCtx,
-		chromedp.Navigate(doc.ID),
-		chromedp.Sleep(3*time.Second),
+		chromedp.Navigate(newDoc.ID),
+		chromedp.WaitVisible("body"),
 		chromedp.OuterHTML("html", &html),
 	)
 
 	if err != nil {
-		return nil, fmt.Errorf("SPA render failed for %s: %w", doc.ID, err)
+		return nil, fmt.Errorf("SPA render failed for %s: %w", newDoc.ID, err)
 	}
 
 	htmlDoc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -53,11 +59,14 @@ func (p *SPACrawlerProcessor) Process(ctx context.Context, doc *core.Document[st
 		return nil, fmt.Errorf("failed to parse rendered HTML: %w", err)
 	}
 
-	doc.Metadata["title"] = strings.TrimSpace(htmlDoc.Find("title").Text())
+	title := strings.TrimSpace(htmlDoc.Find("title").Text())
+	newDoc.Metadata["title"] = title
+	newDoc.Metadata["is_spa_render"] = true
+	newDoc.Metadata["crawled_at"] = time.Now().UTC().Unix()
 
 	htmlDoc.Find("script, style, nav, footer, header, meta, noscript, iframe, svg").Remove()
 
-	doc.Content = strings.Join(strings.Fields(htmlDoc.Find("body").Text()), " ")
+	newDoc.Content = strings.Join(strings.Fields(htmlDoc.Find("body").Text()), " ")
 
-	return []*core.Document[string]{doc}, nil
+	return []*core.Document[string]{newDoc}, nil
 }
