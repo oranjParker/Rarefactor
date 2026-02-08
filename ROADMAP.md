@@ -14,53 +14,85 @@ This document tracks the architectural evolution and long-term goals of the Rare
 - **Budget Control:** Implemented eTLD+1 (Registered Domain) Budgeting via publicsuffix.
 - **Sanitization:** Strict UTF-8 enforcement for gRPC stability.
 
-## Phase 2: Observability & Resilience (Next Target)
+## Phase 2: Distributed DAG Architecture (Current Focus)
+
+**Goal:** Transform the linear pipeline into an Event-Driven Directed Acyclic Graph (DAG) for independent scaling and type-safe parallelism.
+
+### Graph Orchestration (The Core):
+
+- **Implement GraphRunner** to manage parallel branches (e.g., Security vs. Discovery).
+- **Immutability Contract:** Implement `.Clone()` on `Document[T]` to ensure thread-safe fork processing.
+- **Hybrid Nodes:** Support nodes that act as both Processors (Transform) and Sinks (Side-Effect) for the Discovery loop.
+
+### Distributed State & Politeness:
+
+- **Redis Frontier:** Moved the "Visited Map" and Domain Counters to Redis for distributed coordination.
+- **Logarithmic Fairness:** Implemented Redis Lua scripts to enforce logarithmic time penalties on aggressive domains.
+- **Event-Driven Queue:** Replaced in-memory heaps with NATS JetStream for persistent work distribution.
+
+### Functional Refactor:
+
+- Convert all processors to "Pure Functions" (Input -> Output) with no internal state or side effects.
+
+### Smart Crawling:
+
+- **Headless Fallback:** Integrate `chromedp` for indexing JavaScript-heavy SPAs when heuristic checks fail.
+- **Boilerplate Removal:** Optimize vector quality by stripping nav, footer, and script tags pre-ingestion.
+
+## Phase 3: Observability & Resilience (Next Target)
 
 **Goal:** Move from "fire-and-forget" to a persistent, manageable system with a basic UI.
 
-- **State Persistence (Checkpointing):**
-  - Move the visited map and domainQueue to Postgres or Redis to support crawl resumption.
-- **Service Modularization (Prep for Decoupling):**
-  - Refactor the backend into distinct internal packages so that the Crawler and Search services can eventually be compiled into separate binaries.
-  - Implement shared internal interfaces for database access to ensure consistency across services.
-- **Control Plane v1 (The Command Center):**
-  - **Backend:** Implement `crawl_jobs` table and `GET /v1/status/{id}` to track execution history.
-  - **Frontend:** Create a dedicated "Admin" dashboard in the React app with live progress bars and URL discovery feeds.
-  - **Control:** Enable Pause/Resume/Stop functionality via the UI.
-- **Content Quality Filters:**
-  - Implement "Low Information Density" filters to discard maintenance pages and link farms.
+### Control Plane v1 (The Command Center):
 
-## Phase 3: Transition to Distributed Systems (The Event Era)
+- **Backend:** Implement `crawl_jobs` table and `GET /v1/status/{id}` to track execution history.
+- **Frontend:** Create a dedicated "Admin" dashboard with live progress bars and URL discovery feeds.
+- **Control:** Enable Pause/Resume/Stop functionality via NATS control signals.
 
-**Goal:** Physically decouple services for independent scaling and fault tolerance.
+### Advanced Metrics:
 
-- **Service Decoupling:**
-  - Separate the Crawler and Search services into distinct Docker containers.
-  - **Crawler Service:** Focused on fetching, parsing, and embedding generation.
-  - **Search Service:** Focused on Qdrant retrieval, Autocomplete, and user-facing API.
-- **Event-Driven Backbone (Kafka/Redpanda):**
-  - Transition from internal Go channels to a Kafka-compatible message bus (Redpanda) to bridge the decoupled services.
-  - Enable "Message Replay" to allow re-indexing without re-fetching content.
-- **Distributed Politeness:**
-  - Use Redis-based global rate limiting to enforce domain politeness across multiple crawler nodes.
-- **Control Plane v2 (System Health):**
-  - Integrate Prometheus for metrics collection and Grafana for deep infrastructure monitoring.
+- Integrate Prometheus for worker throughput and latency monitoring.
 
 ## Phase 4: Advanced Engine & AI Integration
 
-- **MCP (Model Context Protocol) Server:**
-  - Implement an MCP interface to allow LLMs and AI Agents to use Rarefactor as a native "Search Tool."
-- **Control Plane v3 (Data Insights & Marketing):**
-  - **Advanced Visualization:** Implement D3.js or Three.js "Crawl Graphs" showing domain interlinking.
-  - **Analytics:** Dashboard for "Embedding Drift" and search quality metrics.
-- **Geographic & TLD Sharding:**
-  - Shard the Qdrant index based on Home Country/TLD (e.g., .cn, .ru).
-- **Headless Rendering:**
-  - Integrate Chromedp for indexing JavaScript-heavy SPAs.
+**Goal:** transform Rarefactor into an "Intelligence Infrastructure" for AI Agents.
+
+### MCP (Model Context Protocol) Server:
+
+- Implement an MCP interface to allow LLMs (Claude/Gemini) to use Rarefactor as a native "Search Tool."
+
+### Content Quality Filters:
+
+- Implement "Low Information Density" filters to discard maintenance pages and link farms before embedding.
+
+### Advanced Visualization:
+
+- Implement D3.js or Three.js "Crawl Graphs" showing domain interlinking.
+
+### Geographic & TLD Sharding:
+
+- Shard the Qdrant index based on Home Country/TLD (e.g., .cn, .ru).
+
+## Phase 5: Search Service & RAG Showcase (Long Term)
+
+**Goal:** The public-facing demonstration of the RAG infrastructure.
+
+### Search Service V2:
+
+- Implement the Frequency/Recency Decay ranking algorithm.
+- **Hybrid Retrieval:** Merge Vector Search results with Redis "Hot Cache" data.
+
+### Cache Invalidation:
+
+- Implement Event-Based Invalidation (Delete-on-Update) to ensure search results are never stale.
+
+### Public Demo:
+
+- A polished UI demonstrating the speed and accuracy of the RAG pipeline.
 
 ## Critical Considerations
 
+- **The "Pointer Trap":** Ensure all forks in the DAG use deep copies of metadata to prevent data races.
 - **Resource Accessibility:** Maintain a "Lite" configuration profile (Single Binary + Redis) alongside the "Pro" Distributed setup.
-- **Independent Scaling:** Allow the Search service to scale horizontally during high traffic without increasing Crawler resources.
-- **Cynical Performance Rule:** Raw SQL for high-volume interactions.
-- **Type Safety:** gRPC/Protobuf contract as the absolute source of truth.
+- **Cynical Performance Rule:** Raw SQL for high-volume interactions; avoid ORM overhead in the hot path.
+- **Type Safety:** gRPC/Protobuf contract as the absolute source of truth for inter-service communication.
