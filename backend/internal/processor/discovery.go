@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -18,10 +19,25 @@ func NewDiscoveryProcessor() *DiscoveryProcessor {
 }
 
 func (p *DiscoveryProcessor) Process(ctx context.Context, doc *core.Document[string]) ([]*core.Document[string], error) {
+	log.Println("[Discovery] Processing document for links:", doc.ID)
 	if doc.Source != "web" || doc.Content == "" {
 		return nil, nil
 	}
 
+	maxDepth := 0
+	currentDepth := doc.Depth
+	if val, ok := doc.Metadata["max_depth"]; ok {
+		switch v := val.(type) {
+		case int:
+			maxDepth = v
+		case float64:
+			maxDepth = int(v)
+		}
+	}
+
+	if currentDepth >= maxDepth && maxDepth > 0 {
+		return nil, nil
+	}
 	reader := strings.NewReader(doc.Content)
 	htmlDoc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
@@ -47,6 +63,8 @@ func (p *DiscoveryProcessor) Process(ctx context.Context, doc *core.Document[str
 			discoveredLinks = append(discoveredLinks, newDoc)
 		}
 	})
+
+	log.Printf("[Discovery] Discovered %d links from %s.", len(discoveredLinks), doc.ID)
 
 	return discoveredLinks, nil
 }

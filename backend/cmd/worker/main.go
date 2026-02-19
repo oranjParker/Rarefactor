@@ -4,19 +4,28 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
+	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
+	"github.com/oranjParker/Rarefactor/internal/api/crawler"
 	"github.com/oranjParker/Rarefactor/internal/core"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/processor"
 	"github.com/oranjParker/Rarefactor/internal/sink"
 	"github.com/oranjParker/Rarefactor/internal/source"
 	"github.com/redis/go-redis/v9"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
+
+const GRPC_PORT = ":50051"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -40,12 +49,36 @@ func main() {
 		llmProvider, _ = processor.NewGeminiProvider(ctx, geminiKey)
 	} else if ollamaURL != "" {
 		log.Println("[LLM] Using Ollama (Local/Zero-Cost)")
-		llmProvider = processor.NewOllamaProvider(ollamaURL, "llama3")
+		llmProvider = processor.NewOllamaProvider(ollamaURL, "mistral")
 	} else {
 		log.Println("[LLM] No LLM config found. Using Mock Provider for testing.")
 		llmProvider = &processor.MockProvider{}
 	}
 
+	// =========================================================================
+	// CONTROL PLANE: Start gRPC Server (Simulated API Pod)
+	// =========================================================================
+	go func() {
+		listener, err := net.Listen("tcp", GRPC_PORT)
+		if err != nil {
+			log.Fatalf("[Control Plane] Failed to listen on %s: %v", GRPC_PORT, err)
+		}
+
+		grpcServer := grpc.NewServer()
+		crawlerService := crawler.NewCrawlerService(deps.Postgres, deps.Nats)
+		pb.RegisterCrawlerServiceServer(grpcServer, crawlerService)
+
+		reflection.Register(grpcServer)
+
+		log.Printf("[Control Plane] gRPC API listening on %s", GRPC_PORT)
+		if err := grpcServer.Serve(listener); err != nil {
+			log.Printf("[Control Plane] gRPC server error: %v", err)
+		}
+	}()
+
+	// =========================================================================
+	// DATA PLANE: Start Graph Runner (Simulated Worker Pods)
+	// =========================================================================
 	natsSrc := source.NewNatsSource(deps.Nats.JS, "crawl.jobs", "worker-group")
 	pgSink := sink.NewPostgresSink(deps.Postgres, 50, 5*time.Second)
 	defer pgSink.Close()
@@ -53,7 +86,7 @@ func main() {
 	linkSink := sink.NewNatsSink(deps.Nats.JS, "crawl.jobs")
 	qdrantSink := sink.NewQdrantSink(deps.Qdrant, "documents")
 
-	runner := core.NewGraphRunner("Rarefactor-V2", natsSrc, 10)
+	runner := core.NewGraphRunner("Rarefactor-V2", natsSrc, 3)
 
 	if err := runner.AddProcessor("start", processor.NewPolitenessProcessor(deps.Redis, "RarefactorBot/2.0", 3, 1000)); err != nil {
 		log.Fatalf("Failed to add node 'start': %v", err)
@@ -67,7 +100,7 @@ func main() {
 	if err := runner.AddProcessor("security", processor.NewSecurityProcessor(false)); err != nil { // false = don't fail, just flag
 		log.Fatalf("Failed to add node 'security': %v", err)
 	}
-	if err := runner.AddProcessor("chunker", processor.NewChunkerProcessor(1000, 200)); err != nil {
+	if err := runner.AddProcessor("chunker", processor.NewChunkerProcessor(4000, 400)); err != nil {
 		log.Fatalf("Failed to add node 'chunker': %v", err)
 	}
 	if err := runner.AddProcessor("enrichment", processor.NewEnrichmentProcessor()); err != nil {
@@ -93,11 +126,21 @@ func main() {
 		log.Fatalf("Graph wiring failed: %v", err)
 	}
 
-	runner.Connect("security", "chunker")
-	runner.Connect("chunker", "enrichment")
-	runner.Connect("enrichment", "metadata")
-	runner.Connect("metadata", "persist_pg")
-	runner.Connect("metadata", "embedding")
+	if err := runner.Connect("security", "chunker"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("chunker", "enrichment"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("enrichment", "metadata"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("metadata", "persist_pg"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
+	if err := runner.Connect("metadata", "embedding"); err != nil {
+		log.Fatalf("Graph wiring failed: %v", err)
+	}
 
 	log.Println("[Graph] Worker Topology constructed. Starting engine...")
 	if err := runner.Run(ctx); err != nil {
@@ -132,6 +175,24 @@ func setupWorkerDependencies(ctx context.Context) (*WorkerDependencies, error) {
 		pg.Close()
 		rdb.Close()
 		return nil, fmt.Errorf("nats init: %w", err)
+	}
+	streamName := "CRAWL_JOBS"
+	streamSubject := "crawl.>"
+
+	_, err = nt.JS.StreamInfo(streamName)
+	if err != nil {
+		log.Printf("[NATS] Creating stream %s for subject %s...", streamName, streamSubject)
+		_, err = nt.JS.AddStream(&nats.StreamConfig{
+			Name:      streamName,
+			Subjects:  []string{streamSubject},
+			Retention: nats.WorkQueuePolicy,
+		})
+		if err != nil {
+			pg.Close()
+			rdb.Close()
+			nt.Close()
+			return nil, fmt.Errorf("failed to create nats stream: %w", err)
+		}
 	}
 
 	qdb, err := database.NewQdrantClient(initCtx)

@@ -1,0 +1,5 @@
+FROM nats:alpine
+
+RUN apk add --no-cache curl
+
+EXPOSE 4222 6222 8222

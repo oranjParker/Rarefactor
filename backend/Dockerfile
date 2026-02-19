@@ -6,12 +6,18 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o main ./cmd/worker/main.go
 
 # --- Run Stage ---
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk add --no-cache \
+         ca-certificates \
+         chromium \
+         harfbuzz \
+         freetype \
+         ttf-freefont \
+         nss
 WORKDIR /root/
 COPY --from=builder /app/main .
 EXPOSE 50051 8000

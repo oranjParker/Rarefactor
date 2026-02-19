@@ -1,20 +1,25 @@
 CREATE TABLE IF NOT EXISTS documents (
-    id SERIAL PRIMARY KEY,
-    url TEXT UNIQUE NOT NULL,
-    domain TEXT NOT NULL,
-    title TEXT,
-    content TEXT NOT NULL,
-    raw_content_size INT,
-    crawled_at TIMESTAMPTZ DEFAULT NOW(),
-
+    id TEXT PRIMARY KEY,
+    parent_id TEXT,
     namespace TEXT NOT NULL,
-    tags TEXT[],
+    domain TEXT NOT NULL,
+    source TEXT NOT NULL,
 
-    vector_id UUID UNIQUE,
+    title TEXT,
+    summary TEXT,
+    content TEXT NOT NULL,
+    cleaned_content TEXT,
+    content_hash TEXT,
+    crawled_at TIMESTAMPTZ DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+
     metadata JSONB DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_docs_namespace ON documents(namespace);
-CREATE INDEX IF NOT EXISTS idx_docs_url ON documents(url);
 CREATE INDEX IF NOT EXISTS idx_docs_domain ON documents(domain);
-CREATE INDEX IF NOT EXISTS idx_docs_crawled_at ON documents(crawled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docs_parent_id ON documents(parent_id);
+CREATE INDEX IF NOT EXISTS idx_docs_last_seen ON documents(last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_docs_content_hash ON documents(content_hash);
+
+CREATE INDEX IF NOT EXISTS idx_docs_metadata ON documents USING GIN (metadata);

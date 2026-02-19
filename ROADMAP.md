@@ -43,6 +43,10 @@ This document tracks the architectural evolution and long-term goals of the Rare
 
 **Goal:** Move from "fire-and-forget" to a persistent, manageable system with a basic UI.
 
+### Asynchronous Enrichment (Priority):
+
+- **Objective:** Update the GraphRunner to persist documents with a `PENDING` status immediately after chunking. This allows the LLM/Embedding steps (GPU-bound) to process the backlog at their own pace without blocking the crawler frontier.
+
 ### Control Plane v1 (The Command Center):
 
 - **Backend:** Implement `crawl_jobs` table and `GET /v1/status/{id}` to track execution history.
@@ -53,24 +57,29 @@ This document tracks the architectural evolution and long-term goals of the Rare
 
 - Integrate Prometheus for worker throughput and latency monitoring.
 
-## Phase 4: Advanced Engine & AI Integration
+## Phase 4: Modernization & AI Integration
 
-**Goal:** transform Rarefactor into an "Intelligence Infrastructure" for AI Agents.
+**Goal:** Transform Rarefactor into an "Intelligence Infrastructure" for AI Agents and leverage modern Go features.
+
+### Go 1.26 Upgrade:
+- **Iterators & PGO:** Leverage refined iterators and Profile-Guided Optimization (PGO) for generic Graph nodes to maximize performance on the GPU bottleneck.
+
+### Go Workspace Refactor:
+- **Modularization:** Extract GraphRunner and core interfaces into a standalone module for reuse in projects like 'Resona'.
+
+### NATS JetStream V2 Migration:
+- **Modern Messaging:** Move from Legacy JS to the modern `jetstream` package for improved reliability and performance.
 
 ### MCP (Model Context Protocol) Server:
-
 - Implement an MCP interface to allow LLMs (Claude/Gemini) to use Rarefactor as a native "Search Tool."
 
 ### Content Quality Filters:
-
 - Implement "Low Information Density" filters to discard maintenance pages and link farms before embedding.
 
 ### Advanced Visualization:
-
 - Implement D3.js or Three.js "Crawl Graphs" showing domain interlinking.
 
 ### Geographic & TLD Sharding:
-
 - Shard the Qdrant index based on Home Country/TLD (e.g., .cn, .ru).
 
 ## Phase 5: Search Service & RAG Showcase (Long Term)
@@ -96,3 +105,15 @@ This document tracks the architectural evolution and long-term goals of the Rare
 - **Resource Accessibility:** Maintain a "Lite" configuration profile (Single Binary + Redis) alongside the "Pro" Distributed setup.
 - **Cynical Performance Rule:** Raw SQL for high-volume interactions; avoid ORM overhead in the hot path.
 - **Type Safety:** gRPC/Protobuf contract as the absolute source of truth for inter-service communication.
+
+## Future & Commercial Considerations
+
+### Hosting: Edge Ingestion / Central Inference
+- Crawlers run on cheap VPS/Edge, sending raw or chunked data to a centralized GPU cluster for processing.
+
+### Licensing: "Core-Open, App-Private"
+- Keep the DAG engine (GraphRunner) and core interfaces open-source to build community.
+- Keep the specific AI enrichment logic and "Control Plane" private for potential SaaS monetization.
+
+### Monetization: RAG-as-a-Service
+- Position Rarefactor as a specialized "RAG-as-a-Service" provider for niche, high-accuracy domains.

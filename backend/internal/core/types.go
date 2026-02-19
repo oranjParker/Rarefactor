@@ -6,15 +6,15 @@ import (
 )
 
 type Document[T any] struct {
-	ID             string
-	ParentID       string
-	Source         string
-	Content        T
-	CleanedContent T
-	Metadata       map[string]any
-	CreatedAt      time.Time
-	Depth          int
-	Ack            func()
+	ID             string         `json:"id"`
+	ParentID       string         `json:"parent_id,omitempty"`
+	Source         string         `json:"source"`
+	Content        T              `json:"content"`
+	CleanedContent T              `json:"cleaned_content,omitempty"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	Depth          int            `json:"depth"`
+	Ack            func()         `json:"-"`
 }
 
 func (d *Document[T]) Clone() *Document[T] {

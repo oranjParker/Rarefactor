@@ -61,6 +61,7 @@ func (p *SPACrawlerProcessor) Process(ctx context.Context, doc *core.Document[st
 
 	title := strings.TrimSpace(htmlDoc.Find("title").Text())
 	newDoc.Metadata["title"] = title
+	newDoc.Source = "web"
 	newDoc.Metadata["is_spa_render"] = true
 	newDoc.Metadata["crawled_at"] = time.Now().UTC().Unix()
 

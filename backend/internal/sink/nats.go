@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/nats-io/nats.go"
 	"github.com/oranjParker/Rarefactor/internal/core"
@@ -28,7 +29,12 @@ func (n *NatsSink) Write(ctx context.Context, doc *core.Document[string]) error 
 	}
 
 	_, err = n.JS.Publish(n.Subject, data)
-	return err
+	if err != nil {
+		return fmt.Errorf("nats publish failed: %w", err)
+	}
+
+	log.Printf("[NATS Sink] Discovered link queued: %s -> %s", doc.ID, n.Subject)
+	return nil
 }
 
 func (n *NatsSink) Close() error {

@@ -14,19 +14,25 @@ import (
 type EmbeddingProcessor struct {
 	Endpoint   string
 	httpClient *http.Client
+	Model      string
 }
 
 type EmbeddingRequest struct {
-	Text string `json:"text"`
+	Input []string `json:"input"`
+	Model string   `json:"model"`
+	Task  string   `json:"task"`
 }
 
 type EmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
+	Data []struct {
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
 }
 
 func NewEmbeddingProcessor(endpoint string) *EmbeddingProcessor {
 	return &EmbeddingProcessor{
 		Endpoint: endpoint,
+		Model:    "nomic-ai/nomic-embed-text-v1.5",
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -47,8 +53,18 @@ func (p *EmbeddingProcessor) Process(ctx context.Context, doc *core.Document[str
 		return []*core.Document[string]{newDoc}, nil
 	}
 
-	reqBody, _ := json.Marshal(EmbeddingRequest{Text: textToEmbed})
-	req, err := http.NewRequestWithContext(ctx, "POST", p.Endpoint, bytes.NewBuffer(reqBody))
+	reqBody, _ := json.Marshal(EmbeddingRequest{
+		Input: []string{textToEmbed},
+		Model: p.Model,
+		Task:  "search_document",
+	})
+
+	url := p.Endpoint
+	if !bytes.HasSuffix([]byte(url), []byte("/embeddings")) {
+		url += "/embeddings"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding request: %w", err)
 	}
@@ -56,7 +72,7 @@ func (p *EmbeddingProcessor) Process(ctx context.Context, doc *core.Document[str
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("embedding service unreachable: %w", err)
+		return nil, fmt.Errorf("embedding service unreachable at %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
@@ -66,10 +82,12 @@ func (p *EmbeddingProcessor) Process(ctx context.Context, doc *core.Document[str
 
 	var embResp EmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&embResp); err != nil {
-		return nil, fmt.Errorf("failed to decode embedding: %w", err)
+		return nil, fmt.Errorf("failed to decode embedding response: %w", err)
 	}
 
-	newDoc.Metadata["vector"] = embResp.Embedding
+	if len(embResp.Data) > 0 {
+		newDoc.Metadata["vector"] = embResp.Data[0].Embedding
+	}
 
 	return []*core.Document[string]{newDoc}, nil
 }

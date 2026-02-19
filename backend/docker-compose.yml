@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   server:
     build:
@@ -13,7 +11,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/rarefactor?sslmode=disable
       - QDRANT_URL=qdrant:6334
+      - NATS_URL=nats://nats:4222
       - EMBEDDING_URL=http://embeddings:7997
+      - OLLAMA_URL=http://ollama:11434
     depends_on:
       postgres:
         condition: service_healthy
@@ -21,12 +21,42 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      nats:
+        condition: service_healthy
       embeddings-gpu:
         condition: service_healthy
         required: false
       embeddings-cpu:
-          condition: service_healthy
-          required: false
+        condition: service_healthy
+        required: false
+      ollama:
+        condition: service_healthy
+    networks:
+      rarefactor-backend:
+
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+    container_name: rarefactor-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles: ["gpu"]
+    ports:
+      - "11434:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: [ "CMD", "curl", "--fail", "http://localhost:11434/api/version" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       rarefactor-backend:
 
@@ -53,9 +83,8 @@ services:
     networks:
       rarefactor-backend:
         aliases:
-            - embeddings
+          - embeddings
 
-# For development on Apple Silicon
   embeddings-cpu:
     image: michaelf34/infinity:latest
     profiles: ["cpu"]
@@ -73,7 +102,7 @@ services:
     networks:
       rarefactor-backend:
         aliases:
-            - embeddings
+          - embeddings
 
   redis:
     image: redis:alpine
@@ -116,7 +145,6 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      # We check the REST health port to ensure the gRPC engine is also ready
       test: [ "CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1" ]
       interval: 5s
       timeout: 3s
@@ -125,26 +153,21 @@ services:
       rarefactor-backend:
 
   nats:
-    image: nats:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.nats
     ports:
       - "4222:4222"
       - "8222:8222"
-    command: "-js"
-
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [ gpu ]
+    command: "-js -m 8222"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8222/healthz" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      rarefactor-backend:
 
   migrate:
     image: migrate/migrate
@@ -164,6 +187,7 @@ volumes:
   redis_data:
   postgres_data:
   qdrant_data:
+  ollama_data:
 
 networks:
   rarefactor-backend:

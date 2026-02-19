@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/oranjParker/Rarefactor/internal/core"
 )
@@ -10,57 +11,114 @@ import (
 type ChunkerProcessor struct {
 	MaxChunkSize int
 	Overlap      int
+	Delimiters   []string
 }
 
 func NewChunkerProcessor(size, overlap int) *ChunkerProcessor {
-	return &ChunkerProcessor{MaxChunkSize: size, Overlap: overlap}
+	return &ChunkerProcessor{
+		MaxChunkSize: size,
+		Overlap:      overlap,
+		Delimiters:   []string{"\n\n", "\n", ". ", "! ", "? ", ";", ":", " "},
+	}
 }
 
 func (p *ChunkerProcessor) Process(ctx context.Context, doc *core.Document[string]) ([]*core.Document[string], error) {
-	if doc.Metadata["is_chunk"] == true {
-		return []*core.Document[string]{doc}, nil
+	if doc.Content == "" {
+		return nil, nil
+	}
+	if val, ok := doc.Metadata["is_chunk"].(bool); ok && val {
+		return []*core.Document[string]{doc.Clone()}, nil
 	}
 
-	text := doc.Content
-	if len(text) <= p.MaxChunkSize {
+	rawChunks := p.splitRecursive(doc.Content, p.Delimiters)
+
+	var processedChunks []*core.Document[string]
+	for i, chunkText := range rawChunks {
+		if strings.TrimSpace(chunkText) == "" {
+			continue
+		}
+
+		chunkID := fmt.Sprintf("%s#chunk%d", doc.ID, i)
 		newDoc := doc.Clone()
+		newDoc.ID = chunkID
+		newDoc.ParentID = doc.ID
+		newDoc.Content = chunkText
+
+		newDoc.CleanedContent = ""
+
 		if newDoc.Metadata == nil {
 			newDoc.Metadata = make(map[string]any)
 		}
 		newDoc.Metadata["is_chunk"] = true
-		newDoc.Metadata["chunk_index"] = 0
-		return []*core.Document[string]{newDoc}, nil
+		newDoc.Metadata["chunk_index"] = i
+		newDoc.Metadata["chunk_size"] = len(chunkText)
+
+		processedChunks = append(processedChunks, newDoc)
 	}
 
-	chunks := make([]*core.Document[string], 0)
-	index := 0
-	for i := 0; i < len(text); i += p.MaxChunkSize - p.Overlap {
-		end := i + p.MaxChunkSize
-		if end > len(text) {
-			end = len(text)
+	return processedChunks, nil
+}
+
+func (p *ChunkerProcessor) splitRecursive(text string, delimiters []string) []string {
+	if len(text) <= p.MaxChunkSize {
+		return []string{text}
+	}
+
+	var chunks []string
+	if len(delimiters) == 0 {
+		runes := []rune(text)
+		for i := 0; i < len(runes); i += p.MaxChunkSize - p.Overlap {
+			end := i + p.MaxChunkSize
+			if end > len(runes) {
+				end = len(runes)
+			}
+			chunks = append(chunks, string(runes[i:end]))
+		}
+		return chunks
+	}
+
+	delimiter := delimiters[0]
+	parts := strings.Split(text, delimiter)
+
+	var finalChunks []string
+	var currentChunk strings.Builder
+
+	for i, part := range parts {
+		if len(part) > p.MaxChunkSize {
+			if currentChunk.Len() > 0 {
+				finalChunks = append(finalChunks, strings.TrimSpace(currentChunk.String()))
+				currentChunk.Reset()
+			}
+
+			subChunks := p.splitRecursive(part, delimiters[1:])
+			finalChunks = append(finalChunks, subChunks...)
+			continue
 		}
 
-		chunkText := text[i:end]
-		chunkDoc := doc.Clone()
-
-		chunkDoc.ID = fmt.Sprintf("%s#chunk%d", doc.ID, index)
-		chunkDoc.ParentID = doc.ID
-		chunkDoc.Content = chunkText
-
-		if chunkDoc.Metadata == nil {
-			chunkDoc.Metadata = make(map[string]any)
+		partValue := part
+		if i < len(parts)-1 {
+			partValue += delimiter
 		}
-		chunkDoc.Metadata["is_chunk"] = true
-		chunkDoc.Metadata["chunk_index"] = index
-		chunkDoc.Metadata["chunk_size"] = len(chunkText)
 
-		chunks = append(chunks, chunkDoc)
-		index++
+		if currentChunk.Len()+len(partValue) <= p.MaxChunkSize {
+			if currentChunk.Len() > 0 {
+				chunks = append(chunks, currentChunk.String())
+				currentChunk.Reset()
+			}
 
-		if end == len(text) {
-			break
+			if len(partValue) > p.MaxChunkSize {
+				subChunks := p.splitRecursive(partValue, delimiters[1:])
+				chunks = append(chunks, subChunks...)
+			} else {
+				currentChunk.WriteString(partValue)
+			}
+		} else {
+			currentChunk.WriteString(partValue)
 		}
 	}
 
-	return chunks, nil
+	if currentChunk.Len() > 0 {
+		chunks = append(chunks, currentChunk.String())
+	}
+	return chunks
 }

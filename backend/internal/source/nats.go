@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -43,27 +45,35 @@ func (n *NatsSource) Stream(ctx context.Context) (<-chan *core.Document[string],
 			default:
 				msg, err := sub.NextMsg(time.Second)
 				if err != nil {
+					if err == nats.ErrTimeout {
+						continue
+					}
+					log.Printf("[NATS Source] NextMsg error: %v", err)
 					continue
 				}
 
 				var doc core.Document[string]
 				if err := json.Unmarshal(msg.Data, &doc); err != nil {
-					// Fallback for raw strings (legacy or external producers)
-					doc = core.Document[string]{
-						ID:        string(msg.Data),
-						Source:    "web",
-						CreatedAt: time.Now(),
-						Metadata:  make(map[string]any),
-					}
+					log.Printf("[NATS Source] Malformed JSON, Terminating msg: %v", err)
+					msg.Term()
+					continue
 				}
 
 				if doc.Metadata == nil {
 					doc.Metadata = make(map[string]any)
 				}
 
+				var once sync.Once
+				doc.Ack = func() {
+					once.Do(func() {
+						if err := msg.Ack(); err != nil {
+							log.Printf("[NATS Source] Failed to Ack msg for %s: %v", doc.ID, err)
+						}
+					})
+				}
+
 				select {
 				case out <- &doc:
-					msg.Ack()
 				case <-ctx.Done():
 					return
 				}

@@ -63,6 +63,7 @@ func (p *CrawlerProcessor) Process(ctx context.Context, doc *core.Document[strin
 
 	newDoc := doc.Clone()
 	newDoc.Content = cleanedHTML
+	newDoc.Source = "web"
 	newDoc.Metadata["title"] = title
 	newDoc.Metadata["http_status"] = resp.StatusCode
 	newDoc.Metadata["crawled_at"] = time.Now().UTC().Unix()
