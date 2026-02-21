@@ -12,16 +12,30 @@ service CrawlerService {
       body: "*"
     };
   }
+
+  rpc CancelJob (CancelJobRequest) returns (CancelJobResponse) {
+    option (google.api.http) = {
+      post: "/v1/crawl/{job_id}/cancel"
+    };
+  }
 }
 
 message CrawlRequest {
   string seed_url = 1;
   int32 max_pages = 2;
   int32 max_depth = 3;
-  string crawl_mode = 4; // "broad" or "targeted"
+  string crawl_mode = 4;
 }
 
 message CrawlResponse {
-  int32 pages_crawled = 1;
+  string job_id = 1;
   string status = 2;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {
+  string status = 1;
 }

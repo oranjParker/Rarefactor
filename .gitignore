@@ -53,3 +53,5 @@ client/.DS_Store
 client/.idea/
 client/.vscode/
 
+# --- Backend ---
+backend/.env*

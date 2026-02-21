@@ -1,50 +1,39 @@
-# Rarefactor Backend (Go Refactor)
+# Rarefactor Backend: Distributed DAG Engine
 
-## The Refactor: From Python MVP to Go Production Engine
-If you wish to view the Python MVP, please visit the `demo` branch. While the Python version was successful for proving the concept, the Go refactor was undertaken to solve three critical issues:
+## Core Architecture: `internal/core`
+The backbone of the Rarefactor engine is an event-driven Directed Acyclic Graph (DAG) that allows for type-safe, concurrent processing of documents.
 
-1.  **Concurrency & Throughput:** Moving from AsyncIO to Go's native CSP model (Goroutines/Channels) for 10x crawling performance.
-2.  **From Lexical to Semantic:** Moving from Postgres `tsvector` (keyword matching) to Vector Embeddings via Qdrant (semantic matching).
-3.  **The Frontier Problem:** Replacing simple URL queues with a priority-weighted Domain Frontier.
+- **`GraphRunner[T]`**: The primary orchestrator that manages the flow of data through the DAG. It supports parallel execution branches and ensures that the system can scale horizontally.
+- **`Node[T]`**: Individual units of work within the graph. Nodes can be **Processors** (transforming data), **Sinks** (side-effects like storage), or **Hybrids**.
+- **`Document[T]`**: The generic unit of data that flows through the system. It carries the primary content, metadata, and includes a `.Clone()` method to satisfy the **Immutability Contract** when the DAG forks into multiple branches.
 
-## Advanced Frontier Management
-The crawler's intelligence resides in the `coordinator.go`, which manages the discovery frontier:
+## Processing Pipeline: `internal/processor`
+Rarefactor utilizes a series of specialized processors to transform raw web data into high-quality vector embeddings:
 
--   **Domain Diversity:** Using a `DomainHeap` (Priority Queue), the system ensures we aren't just hammering one domain, distributing load across the web.
--   **Logarithmic Penalty Weighting:** To prevent large sites from starving the crawler, we implement a fairness algorithm: `math.Log1p(float64(h[i].PageCount)) * 10`. This ensures a diverse index by increasing the "cost" of crawling subsequent pages from the same host.
--   **eTLD+1 Budgeting:** We use `publicsuffix` logic to treat subdomains (e.g., `user1.tumblr.com` and `user2.tumblr.com`) as a single registered domain for budgeting purposes, preventing "infinite" subdomain crawls from consuming all resources.
+- **SmartCrawler**: A heuristic-based crawler that decides between standard HTML fetching and headless rendering.
+- **SPACrawler**: Uses `chromedp` for full headless browser rendering, ensuring JavaScript-heavy sites are correctly indexed.
+- **Security**: Validates URLs and enforces safety constraints (e.g., avoiding internal IP ranges).
+- **Politeness**: Enforces domain-specific crawl delays using Redis-backed distributed state and Lua scripts.
+- **Chunker**: Breaks down large documents into manageable segments for embedding, with strict UTF-8 enforcement.
+- **Embedding**: Generates high-dimensional vectors using local models (e.g., via the Infinity engine).
+- **Metadata**: Extracts and normalizes structured information (titles, summaries, etc.) from crawled content.
 
-## Semantic Search & Local Embeddings
--   **Local Embedding Generation:** We utilize the Infinity engine to serve `nomic-embed-text-v1.5` locally. This removes dependency on expensive third-party APIs (like OpenAI) and ensures data privacy and low latency.
--   **Vector DB:** We utilize Qdrant to perform high-dimensional similarity searches, allowing the engine to understand "context" rather than just "keywords."
+## AI & LLM Integration
+We support multiple LLM providers through a unified interface for enrichment and analysis:
+- **Gemini**: Google's high-performance multimodal models.
+- **Ollama**: For local LLM inference.
+- **Mock**: Used for high-speed testing and CI/CD without external dependencies.
 
-## The Communication Layer
--   **gRPC-First Philosophy:** The `protos/v1` contract is the Single Source of Truth for the entire system. All internal communication is strictly typed and high-performance.
--   **gRPC-Gateway:** We use gRPC-Gateway to automatically generate a RESTful HTTP/1.1 API from our proto definitions. This allows the frontend to remain simple while the backend retains the performance of gRPC.
+## Testing & Quality Assurance
+We maintain >85% unit test coverage to ensure system reliability:
 
-## Modern Tooling
--   **UTF-8 Enforcement:** The crawler includes strict sanitization logic (`SanitizeUTF8`) as a necessary guardrail for crawling the "Wild Web," where legacy encodings or malformed byte sequences often crash modern gRPC marshallers.
+- **Database Testing**: Requires `pgxmock` for mocking PostgreSQL interactions.
+- **API Mocks**: Uses `httptest` for simulating external web servers and gRPC-Gateway endpoints.
+- **SPA Testing**: Headless browser tests using `chromedp` will **automatically skip** if Chrome is not detected locally, preventing CI failures in restricted environments.
 
-## Technology Stack
-- **Language:** Go (1.21+)
-- **Communication:** gRPC for internal calls; gRPC-Gateway for HTTP/1.1 REST.
-- **Relational DB:** Postgres with pgxpool.
-- **Cache/Queue:** Redis.
-- **Vector DB:** Qdrant for semantic search.
-- **Embeddings:** Infinity engine (`michaelf34/infinity`) serving `nomic-embed-text-v1.5`.
-
-## Running with Docker
-The backend stack is fully containerized. To start all services including the Go server:
+## Running the Backend
+The backend is fully containerized via `docker-compose.yml`. To start the distributed stack for local development with GPU support:
 ```bash
-docker-compose up -d
+docker compose --profile gpu up -d
 ```
-To stop all services:
-```bash
-docker-compose down
-```
-This starts:
-- `rarefactor-server`: The Go gRPC/REST gateway.
-- `rarefactor-embeddings`: Infinity embedding server (port 7997).
-- `rarefactor-postgres`: Relational storage.
-- `rarefactor-redis`: Task queue and cache.
-- `rarefactor-qdrant`: Vector database.
+This includes the Go server, PostgreSQL, Redis, NATS JetStream, and Qdrant.
