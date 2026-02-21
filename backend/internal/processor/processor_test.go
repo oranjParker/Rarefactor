@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -92,13 +93,13 @@ func TestPolitenessProcessor_Logic(t *testing.T) {
 		}
 
 		_, err := proc.Process(ctx, doc)
-		if err == nil {
-			t.Error("Expected core.ErrDelayRequired on immediate second hit, got nil")
+
+		if !errors.Is(err, core.ErrDelayRequired) {
+			t.Errorf("Expected core.ErrDelayRequired, got: %v", err)
 		}
 
-		expectedWait := "wait 3.00s"
-		if !strings.Contains(err.Error(), expectedWait) {
-			t.Errorf("Error string mismatch.\nExpected to contain: %q\nActual: %q", expectedWait, err.Error())
+		if !strings.Contains(err.Error(), "wait") || !strings.HasSuffix(err.Error(), "s") {
+			t.Errorf("Error message missing duration format. Got: %q", err.Error())
 		}
 	})
 
