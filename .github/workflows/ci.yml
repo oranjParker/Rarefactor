@@ -41,9 +41,14 @@ jobs:
       - name: Tidy go modules
         run: go mod tidy
 
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Run Tests with Coverage
         run: |
-          go test -coverprofile=coverage.out ./internal/processor ./internal/core ./internal/utils
+          go test -coverprofile=coverage.out ./internal/processor ./internal/core ./internal/utils ./internal/api
           go tool cover -func=coverage.out
 
       - name: Enforce Coverage Threshold
