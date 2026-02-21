@@ -20,7 +20,7 @@ func NewDiscoveryProcessor() *DiscoveryProcessor {
 
 func (p *DiscoveryProcessor) Process(ctx context.Context, doc *core.Document[string]) ([]*core.Document[string], error) {
 	log.Println("[Discovery] Processing document for links:", doc.ID)
-	if doc.Source != "web" || doc.Content == "" {
+	if (doc.Source != "web" && doc.Source != "discovery" && doc.Source != "api_trigger") || doc.Content == "" {
 		return nil, nil
 	}
 

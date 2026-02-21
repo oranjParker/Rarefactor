@@ -1,8 +1,8 @@
 services:
-  server:
+  web-discovery:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.web-discovery
     container_name: rarefactor-server
     ports:
       - "50051:50051"
@@ -10,29 +10,43 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/rarefactor?sslmode=disable
-      - QDRANT_URL=qdrant:6334
       - NATS_URL=nats://nats:4222
-      - EMBEDDING_URL=http://embeddings:7997
-      - OLLAMA_URL=http://ollama:11434
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      nats:
+        condition: service_healthy
+    networks:
+      rarefactor-backend:
+        aliases:
+          - discovery
+
+  enrichment:
+    build:
+      context: .
+      dockerfile: Dockerfile.enrichment
+    container_name: rarefactor-enrichment
+    depends_on:
       qdrant:
         condition: service_started
+      postgres:
+        condition: service_healthy
       nats:
         condition: service_healthy
       embeddings-gpu:
         condition: service_healthy
-        required: false
-      embeddings-cpu:
-        condition: service_healthy
-        required: false
-      ollama:
-        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/rarefactor?sslmode=disable
+      - QDRANT_URL=qdrant:6334
+      - EMBEDDING_URL=http://embeddings:7997
+      - OLLAMA_URL=http://ollama:11434
     networks:
       rarefactor-backend:
+        aliases:
+          - enrichment
 
   ollama:
     build:

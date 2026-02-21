@@ -22,22 +22,33 @@ const (
 )
 
 type PolitenessProcessor struct {
-	Redis             *redis.Client
+	Redis             RedisClient
 	UserAgent         string
 	httpClient        *http.Client
 	MaxDepth          int
 	MaxPagesPerDomain int
+	BaseDelay         time.Duration
+}
+type RedisClient interface {
+	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+	HIncrBy(ctx context.Context, key, field string, incr int64) *redis.IntCmd
 }
 
-func NewPolitenessProcessor(rdb *redis.Client, ua string, maxDepth, maxPages int) *PolitenessProcessor {
+func NewPolitenessProcessor(rdb RedisClient, ua string, maxDepth, maxPages int, allowInternal bool) *PolitenessProcessor {
 	return &PolitenessProcessor{
 		Redis:             rdb,
 		UserAgent:         ua,
 		MaxDepth:          maxDepth,
 		MaxPagesPerDomain: maxPages,
 		httpClient: utils.NewSafeHTTPClient(utils.ClientConfig{
-			Timeout: 5 * time.Second,
+			Timeout:       5 * time.Second,
+			AllowInternal: allowInternal,
 		}),
+		BaseDelay: 2 * time.Second,
 	}
 }
 
@@ -92,8 +103,10 @@ func (p *PolitenessProcessor) Process(ctx context.Context, doc *core.Document[st
 		p.Redis.Del(ctx, visitedKey)
 	}
 
+	baseDelayInSeconds := p.BaseDelay.Seconds()
+
 	if res > 1 {
-		penaltySeconds := math.Log2(float64(res))
+		penaltySeconds := math.Log2(float64(res)) + baseDelayInSeconds
 		elapsed := time.Since(doc.CreatedAt).Seconds()
 
 		if elapsed < penaltySeconds {

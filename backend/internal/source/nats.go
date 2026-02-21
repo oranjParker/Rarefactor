@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -29,9 +30,13 @@ func NewNatsSource(js nats.JetStreamContext, subject, queue string) *NatsSource 
 func (n *NatsSource) Stream(ctx context.Context) (<-chan *core.Document[string], error) {
 	out := make(chan *core.Document[string])
 
-	sub, err := n.JS.QueueSubscribeSync(n.Subject, n.Queue)
+	sub, err := n.JS.QueueSubscribeSync(n.Subject, n.Queue, nats.AckExplicit())
 	if err != nil {
 		return nil, fmt.Errorf("nats subscription failed: %w", err)
+	}
+
+	if err := sub.SetPendingLimits(100000, 512*1024*1024); err != nil {
+		log.Printf("[NATS Source] Warning: Could not set pending limits: %v", err)
 	}
 
 	go func() {
@@ -45,7 +50,7 @@ func (n *NatsSource) Stream(ctx context.Context) (<-chan *core.Document[string],
 			default:
 				msg, err := sub.NextMsg(time.Second)
 				if err != nil {
-					if err == nats.ErrTimeout {
+					if errors.Is(err, nats.ErrTimeout) {
 						continue
 					}
 					log.Printf("[NATS Source] NextMsg error: %v", err)

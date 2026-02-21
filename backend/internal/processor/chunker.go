@@ -64,61 +64,58 @@ func (p *ChunkerProcessor) splitRecursive(text string, delimiters []string) []st
 		return []string{text}
 	}
 
-	var chunks []string
 	if len(delimiters) == 0 {
+		var chunks []string
 		runes := []rune(text)
-		for i := 0; i < len(runes); i += p.MaxChunkSize - p.Overlap {
+		step := p.MaxChunkSize - p.Overlap
+		if step <= 0 {
+			step = p.MaxChunkSize
+		}
+		for i := 0; i < len(runes); i += step {
 			end := i + p.MaxChunkSize
 			if end > len(runes) {
 				end = len(runes)
 			}
 			chunks = append(chunks, string(runes[i:end]))
+			if end == len(runes) {
+				break
+			}
 		}
 		return chunks
 	}
 
 	delimiter := delimiters[0]
 	parts := strings.Split(text, delimiter)
-
-	var finalChunks []string
-	var currentChunk strings.Builder
+	var result []string
+	var current strings.Builder
 
 	for i, part := range parts {
-		if len(part) > p.MaxChunkSize {
-			if currentChunk.Len() > 0 {
-				finalChunks = append(finalChunks, strings.TrimSpace(currentChunk.String()))
-				currentChunk.Reset()
-			}
-
-			subChunks := p.splitRecursive(part, delimiters[1:])
-			finalChunks = append(finalChunks, subChunks...)
-			continue
-		}
-
-		partValue := part
+		partWithDelimiter := part
 		if i < len(parts)-1 {
-			partValue += delimiter
+			partWithDelimiter += delimiter
 		}
 
-		if currentChunk.Len()+len(partValue) <= p.MaxChunkSize {
-			if currentChunk.Len() > 0 {
-				chunks = append(chunks, currentChunk.String())
-				currentChunk.Reset()
+		if len(partWithDelimiter) > p.MaxChunkSize {
+			if current.Len() > 0 {
+				result = append(result, current.String())
+				current.Reset()
 			}
-
-			if len(partValue) > p.MaxChunkSize {
-				subChunks := p.splitRecursive(partValue, delimiters[1:])
-				chunks = append(chunks, subChunks...)
-			} else {
-				currentChunk.WriteString(partValue)
-			}
+			subChunks := p.splitRecursive(partWithDelimiter, delimiters[1:])
+			result = append(result, subChunks...)
+		} else if current.Len()+len(partWithDelimiter) <= p.MaxChunkSize {
+			current.WriteString(partWithDelimiter)
 		} else {
-			currentChunk.WriteString(partValue)
+			if current.Len() > 0 {
+				result = append(result, current.String())
+			}
+			current.Reset()
+			current.WriteString(partWithDelimiter)
 		}
 	}
 
-	if currentChunk.Len() > 0 {
-		chunks = append(chunks, currentChunk.String())
+	if current.Len() > 0 {
+		result = append(result, current.String())
 	}
-	return chunks
+
+	return result
 }

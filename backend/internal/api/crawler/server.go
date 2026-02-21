@@ -8,19 +8,30 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/nats-io/nats.go"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
 	"github.com/oranjParker/Rarefactor/internal/core"
-	"github.com/oranjParker/Rarefactor/internal/database"
 )
+
+type DBExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type JetStreamPublisher interface {
+	Publish(subj string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error)
+}
 
 type CrawlerService struct {
 	pb.UnimplementedCrawlerServiceServer
-	db   *pgxpool.Pool
-	nats *database.NatsConn
+	db   DBExecutor
+	nats JetStreamPublisher
 }
 
-func NewCrawlerService(db *pgxpool.Pool, nats *database.NatsConn) *CrawlerService {
+func NewCrawlerService(db DBExecutor, nats JetStreamPublisher) *CrawlerService {
 	return &CrawlerService{
 		db:   db,
 		nats: nats,
@@ -61,7 +72,7 @@ func (s *CrawlerService) Crawl(ctx context.Context, req *pb.CrawlRequest) (*pb.C
 		return nil, fmt.Errorf("failed to marshal job payload: %w", err)
 	}
 
-	if _, err := s.nats.JS.Publish("crawl.jobs", payload); err != nil {
+	if _, err := s.nats.Publish("crawl.jobs", payload); err != nil {
 		_, _ = s.db.Exec(ctx, "UPDATE crawl_jobs SET status = 'FAILED' WHERE id = $1", jobID)
 		return nil, fmt.Errorf("failed to queue job: %w", err)
 	}

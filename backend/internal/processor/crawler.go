@@ -62,6 +62,9 @@ func (p *CrawlerProcessor) Process(ctx context.Context, doc *core.Document[strin
 	title := strings.TrimSpace(htmlDoc.Find("title").Text())
 
 	newDoc := doc.Clone()
+	if newDoc.Metadata == nil {
+		newDoc.Metadata = make(map[string]any)
+	}
 	newDoc.Content = cleanedHTML
 	newDoc.Source = "web"
 	newDoc.Metadata["title"] = title

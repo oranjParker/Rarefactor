@@ -38,10 +38,14 @@ func (p *EnrichmentProcessor) Process(ctx context.Context, doc *core.Document[st
 	newDoc := doc.Clone()
 	cleaned := strings.ToLower(newDoc.Content)
 	cleaned = strings.ReplaceAll(cleaned, "can't", "cannot")
+	cleaned = strings.ReplaceAll(cleaned, "won't", "will not")
 	cleaned = strings.ReplaceAll(cleaned, "n't", " not")
 	cleaned = strings.ReplaceAll(cleaned, "it's", "it is")
-	cleaned = strings.ReplaceAll(cleaned, "i'm", "i am")
-	cleaned = strings.ReplaceAll(cleaned, "you're", "you are")
+	cleaned = strings.ReplaceAll(cleaned, "'m", " am")
+	cleaned = strings.ReplaceAll(cleaned, "'re", " are")
+	cleaned = strings.ReplaceAll(cleaned, "'d", " would")
+	cleaned = strings.ReplaceAll(cleaned, "'ll", " will")
+	cleaned = strings.ReplaceAll(cleaned, "'ve", " have")
 
 	newDoc.CleanedContent = cleaned
 	if newDoc.Metadata == nil {

@@ -43,7 +43,7 @@ jobs:
 
       - name: Run Tests with Coverage
         run: |
-          go test -coverprofile=coverage.out ./internal/crawler ./internal/search ./internal/utils
+          go test -coverprofile=coverage.out ./internal/processor ./internal/core ./internal/utils
           go tool cover -func=coverage.out
 
       - name: Enforce Coverage Threshold

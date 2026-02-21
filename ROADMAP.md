@@ -14,27 +14,24 @@ This document tracks the architectural evolution and long-term goals of the Rare
 - **Budget Control:** Implemented eTLD+1 (Registered Domain) Budgeting via publicsuffix.
 - **Sanitization:** Strict UTF-8 enforcement for gRPC stability.
 
-## Phase 2: Distributed DAG Architecture (Current Focus)
+## Phase 2: Distributed DAG Architecture (Completed)
 
 **Goal:** Transform the linear pipeline into an Event-Driven Directed Acyclic Graph (DAG) for independent scaling and type-safe parallelism.
-
-### Graph Orchestration (The Core):
-
+### Key Achievements:
+#### Graph Orchestration (The Core):
 - **Implement GraphRunner** to manage parallel branches (e.g., Security vs. Discovery).
 - **Immutability Contract:** Implement `.Clone()` on `Document[T]` to ensure thread-safe fork processing.
 - **Hybrid Nodes:** Support nodes that act as both Processors (Transform) and Sinks (Side-Effect) for the Discovery loop.
 
-### Distributed State & Politeness:
-
+#### Distributed State & Politeness:
 - **Redis Frontier:** Moved the "Visited Map" and Domain Counters to Redis for distributed coordination.
 - **Logarithmic Fairness:** Implemented Redis Lua scripts to enforce logarithmic time penalties on aggressive domains.
 - **Event-Driven Queue:** Replaced in-memory heaps with NATS JetStream for persistent work distribution.
 
-### Functional Refactor:
-
+#### Functional Refactor:
 - Convert all processors to "Pure Functions" (Input -> Output) with no internal state or side effects.
 
-### Smart Crawling:
+#### Smart Crawling:
 
 - **Headless Fallback:** Integrate `chromedp` for indexing JavaScript-heavy SPAs when heuristic checks fail.
 - **Boilerplate Removal:** Optimize vector quality by stripping nav, footer, and script tags pre-ingestion.

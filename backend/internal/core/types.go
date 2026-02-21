@@ -34,20 +34,18 @@ func (d *Document[T]) Clone() *Document[T] {
 	return &newDoc
 }
 
+func (d *Document[T]) DoAck() {
+	if d != nil && d.Ack != nil {
+		d.Ack()
+	}
+}
+
 type Source[T any] interface {
 	Stream(ctx context.Context) (<-chan T, error)
 }
 
 type Processor[In any, Out any] interface {
 	Process(ctx context.Context, input In) ([]Out, error)
-}
-
-type FunctionalProcessor[In any, Out any] struct {
-	Fn func(context.Context, In) ([]Out, error)
-}
-
-func (p *FunctionalProcessor[In, Out]) Process(ctx context.Context, input In) ([]Out, error) {
-	return p.Fn(ctx, input)
 }
 
 type Sink[T any] interface {

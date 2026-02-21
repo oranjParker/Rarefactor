@@ -1,4 +1,4 @@
-package processor
+package llm_provider
 
 import (
 	"bytes"
