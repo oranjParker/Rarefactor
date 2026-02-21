@@ -2,22 +2,22 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Rarefactor
 Upstream-Contact: Kenneth Bester Jr bester_kenny@yahoo.com
 
-Default for all project files
+# Default for all project files
 Files: *
 Copyright: 2026 Kenneth Bester Jr
 License: AGPL-3.0-only
 
-Infrastructure and configuration files
+# Infrastructure and configuration files
 Files: .github/workflows/* Dockerfile* docker-compose.yml
 Copyright: 2026 Kenneth Bester Jr
 License: AGPL-3.0-only
 
-Markdown documentation
+# Markdown documentation
 Files: *.md
 Copyright: 2026 Kenneth Bester Jr
 License: AGPL-3.0-only
 
-Database migrations
+# Database migrations
 Files: migrations/*.sql
 Copyright: 2026 Kenneth Bester Jr
 License: AGPL-3.0-only
