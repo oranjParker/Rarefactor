@@ -51,21 +51,15 @@ func (p *CrawlerProcessor) Process(ctx context.Context, doc *core.Document[strin
 	if err != nil {
 		return nil, err
 	}
-
-	htmlDoc.Find("script, style, noscript, iframe, svg, nav, footer").Remove()
-
-	cleanedHTML, err := htmlDoc.Html()
-	if err != nil {
-		return nil, fmt.Errorf("html re-render failed: %w", err)
-	}
-
 	title := strings.TrimSpace(htmlDoc.Find("title").Text())
+
+	extractedText := strings.Join(strings.Fields(htmlDoc.Find("h1, h2, h3, p, li, td, blockquote, article, main").Text()), " ")
 
 	newDoc := doc.Clone()
 	if newDoc.Metadata == nil {
 		newDoc.Metadata = make(map[string]any)
 	}
-	newDoc.Content = cleanedHTML
+	newDoc.Content = extractedText
 	newDoc.Source = "web"
 	newDoc.Metadata["title"] = title
 	newDoc.Metadata["http_status"] = resp.StatusCode

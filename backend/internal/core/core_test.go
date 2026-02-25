@@ -113,6 +113,24 @@ func TestDocument_DoAck(t *testing.T) {
 	docNoAck.DoAck()
 }
 
+func TestDocument_CloneDeepCopiesSlices(t *testing.T) {
+	original := &Document[string]{
+		ID: "test-1",
+		Metadata: map[string]any{
+			"vector": []float32{1.0, 2.0, 3.0},
+		},
+	}
+
+	clone := original.Clone()
+
+	clone.Metadata["vector"].([]float32)[0] = 10.0
+
+	originalVector := original.Metadata["vector"].([]float32)
+	if originalVector[0] == clone.Metadata["vector"].([]float32)[0] {
+		t.Errorf("deep copy failed: original vector and clone vector point to same memory location")
+	}
+}
+
 func TestGraphRunner_TopologyErrors(t *testing.T) {
 	src := &mockSource{items: []string{"test"}}
 	runner := NewGraphRunner("test-graph", src, 1)

@@ -64,10 +64,7 @@ func (p *SPACrawlerProcessor) Process(ctx context.Context, doc *core.Document[st
 	newDoc.Source = "web"
 	newDoc.Metadata["is_spa_render"] = true
 	newDoc.Metadata["crawled_at"] = time.Now().UTC().Unix()
-
-	htmlDoc.Find("script, style, nav, footer, header, meta, noscript, iframe, svg").Remove()
-
-	newDoc.Content = strings.Join(strings.Fields(htmlDoc.Find("body").Text()), " ")
+	newDoc.Content = strings.Join(strings.Fields(htmlDoc.Find("h1, h2, h3, p, li, td, blockquote, article, main").Text()), " ")
 
 	return []*core.Document[string]{newDoc}, nil
 }

@@ -27,7 +27,14 @@ func (d *Document[T]) Clone() *Document[T] {
 	if d.Metadata != nil {
 		newDoc.Metadata = make(map[string]any, len(d.Metadata))
 		for k, v := range d.Metadata {
-			newDoc.Metadata[k] = v
+			switch t := v.(type) {
+			case []any:
+				newDoc.Metadata[k] = append([]any(nil), t...)
+			case []float32:
+				newDoc.Metadata[k] = append([]float32(nil), t...)
+			default:
+				newDoc.Metadata[k] = v
+			}
 		}
 	}
 

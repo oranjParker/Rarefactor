@@ -127,18 +127,24 @@ func (g *GraphRunner[T]) executeNode(ctx context.Context, node *Node[T], item T)
 	}
 
 	for _, res := range currentItems {
-		for _, next := range node.Downstream {
-			var passItem T
-			if len(node.Downstream) > 1 {
+		if len(node.Downstream) > 1 {
+			var executionGroup sync.WaitGroup
+			for i := 0; i < len(node.Downstream); i++ {
+				executionGroup.Add(1)
+				var passItem T
 				if cloner, ok := any(res).(interface{ Clone() T }); ok {
 					passItem = cloner.Clone()
 				} else {
 					passItem = res
 				}
-			} else {
-				passItem = res
+				go func(i int, passItem T) {
+					defer executionGroup.Done()
+					g.executeNode(ctx, node.Downstream[i], passItem)
+				}(i, passItem)
 			}
-			g.executeNode(ctx, next, passItem)
+			executionGroup.Wait()
+		} else if len(node.Downstream) == 1 {
+			g.executeNode(ctx, node.Downstream[0], res)
 		}
 	}
 }
