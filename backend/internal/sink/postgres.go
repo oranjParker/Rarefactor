@@ -174,9 +174,13 @@ func (s *PostgresSink) executeBatch(ctx context.Context, items []*core.Document[
 		_, err := br.Exec()
 		if err != nil {
 			log.Printf("[PostgresSink] Batch exec error for item %s: %v\n", items[i].ID, err)
+			if items[i].CT != nil {
+				items[i].CT.Fail()
+				items[i].CT.Done()
+			}
 		} else {
-			if items[i].Ack != nil {
-				items[i].Ack()
+			if items[i].CT != nil {
+				items[i].CT.Done()
 			}
 		}
 	}

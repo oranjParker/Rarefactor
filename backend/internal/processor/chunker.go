@@ -32,14 +32,14 @@ func (p *ChunkerProcessor) Process(ctx context.Context, doc *core.Document[strin
 
 	rawChunks := p.splitRecursive(doc.Content, p.Delimiters)
 
-	var processedChunks []*core.Document[string]
-	for i, chunkText := range rawChunks {
-		if strings.TrimSpace(chunkText) == "" {
-			continue
-		}
+	filtered := filterEmptyChunks(rawChunks)
+	doc.CT.Add(len(filtered))
 
+	var processedChunks []*core.Document[string]
+	for i, chunkText := range filtered {
 		chunkID := fmt.Sprintf("%s#chunk%d", doc.ID, i)
 		newDoc := doc.Clone()
+
 		newDoc.ID = chunkID
 		newDoc.ParentID = doc.ID
 		newDoc.Content = chunkText
@@ -55,6 +55,8 @@ func (p *ChunkerProcessor) Process(ctx context.Context, doc *core.Document[strin
 
 		processedChunks = append(processedChunks, newDoc)
 	}
+
+	go doc.CT.WaitAndFinish()
 
 	return processedChunks, nil
 }
@@ -118,4 +120,15 @@ func (p *ChunkerProcessor) splitRecursive(text string, delimiters []string) []st
 	}
 
 	return result
+}
+
+func filterEmptyChunks(chunks []string) []string {
+	var filtered []string
+	for _, chunk := range chunks {
+		if strings.TrimSpace(chunk) == "" {
+			continue
+		}
+		filtered = append(filtered, chunk)
+	}
+	return filtered
 }

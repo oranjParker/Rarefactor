@@ -95,22 +95,82 @@ func TestDocument_Clone(t *testing.T) {
 	})
 }
 
-func TestDocument_DoAck(t *testing.T) {
-	acked := false
-	doc := &Document[string]{
-		Ack: func() { acked = true },
-	}
-	doc.DoAck()
-	if !acked {
-		t.Error("DoAck failed to call Ack function")
-	}
+func TestCompletionTracker(t *testing.T) {
+	t.Run("Success Path", func(t *testing.T) {
+		acked := false
+		nacked := false
+		ct := NewCompletionTracker(func() { acked = true }, func() { nacked = true })
 
-	// Should not panic
-	var nilDoc *Document[string]
-	nilDoc.DoAck()
+		ct.Add(2)
+		go func() {
+			ct.Done()
+			ct.Done()
+		}()
 
-	docNoAck := &Document[string]{}
-	docNoAck.DoAck()
+		ct.WaitAndFinish()
+
+		if !acked {
+			t.Error("expected acked to be true")
+		}
+		if nacked {
+			t.Error("expected nacked to be false")
+		}
+	})
+
+	t.Run("Fail Path", func(t *testing.T) {
+		acked := false
+		nacked := false
+		ct := NewCompletionTracker(func() { acked = true }, func() { nacked = true })
+
+		ct.Add(1)
+		ct.Fail()
+		ct.Done()
+
+		ct.WaitAndFinish()
+
+		if acked {
+			t.Error("expected acked to be false")
+		}
+		if !nacked {
+			t.Error("expected nacked to be true")
+		}
+	})
+
+	t.Run("Nil Callbacks", func(t *testing.T) {
+		ct := NewCompletionTracker(nil, nil)
+		ct.Add(1)
+		ct.Done()
+		// Should not panic
+		ct.WaitAndFinish()
+
+		ct.Add(1)
+		ct.Fail()
+		ct.Done()
+		// Should not panic
+		ct.WaitAndFinish()
+	})
+
+	t.Run("Document Clone with CT", func(t *testing.T) {
+		acked := false
+		ct := NewCompletionTracker(func() { acked = true }, nil)
+		doc := &Document[string]{
+			ID: "parent",
+			CT: ct,
+		}
+
+		clone := doc.Clone()
+		if clone.CT != ct {
+			t.Error("clone should share the same CompletionTracker")
+		}
+
+		ct.Add(1)
+		ct.Done()
+		ct.WaitAndFinish()
+
+		if !acked {
+			t.Error("expected acked to be true via shared CT")
+		}
+	})
 }
 
 func TestDocument_CloneDeepCopiesSlices(t *testing.T) {
@@ -177,7 +237,7 @@ func TestGraphRunner_HybridNode(t *testing.T) {
 	}
 
 	if len(finalSink.received) != 1 || finalSink.received[0] != "input-proc" {
-		t.Errorf("Final sink failed to receive downstream item. Got: %v", finalSink.received)
+		t.Errorf("Final sink failed to receive downstream data. Got: %v", finalSink.received)
 	}
 }
 
@@ -216,7 +276,7 @@ func TestGraphRunner_ConcurrencySafety(t *testing.T) {
 	itemCount := 100
 	items := make([]string, itemCount)
 	for i := 0; i < itemCount; i++ {
-		items[i] = fmt.Sprintf("item-%d", i)
+		items[i] = fmt.Sprintf("data-%d", i)
 	}
 
 	src := &mockSource{items: items}

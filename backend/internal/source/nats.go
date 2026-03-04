@@ -69,13 +69,23 @@ func (n *NatsSource) Stream(ctx context.Context) (<-chan *core.Document[string],
 				}
 
 				var once sync.Once
-				doc.Ack = func() {
+				ack := func() {
 					once.Do(func() {
 						if err := msg.Ack(); err != nil {
 							log.Printf("[NATS Source] Failed to Ack msg for %s: %v", doc.ID, err)
 						}
 					})
 				}
+
+				nack := func() {
+					once.Do(func() {
+						if err := msg.Nak(); err != nil {
+							log.Printf("[NATS Source] Failed to Nack msg for %s: %v", doc.ID, err)
+						}
+					})
+				}
+
+				doc.CT = core.NewCompletionTracker(ack, nack)
 
 				select {
 				case out <- &doc:

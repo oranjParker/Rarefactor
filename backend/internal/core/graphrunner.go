@@ -113,7 +113,7 @@ func (g *GraphRunner[T]) executeNode(ctx context.Context, node *Node[T], item T)
 	if node.Processor != nil {
 		results, err := node.Processor.Process(ctx, item)
 		if err != nil {
-			fmt.Printf("[%s] Processor Failure: %v\n]", node.Name, err)
+			fmt.Printf("[%s] Processor Failure: %v\n", node.Name, err)
 		}
 		currentItems = results
 	}

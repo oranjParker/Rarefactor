@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,7 +16,49 @@ type Document[T any] struct {
 	Metadata       map[string]any `json:"metadata,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
 	Depth          int            `json:"depth"`
-	Ack            func()         `json:"-"`
+	CT             *CompletionTracker
+}
+
+type CompletionTracker struct {
+	wg     sync.WaitGroup
+	failed atomic.Bool
+	ack    func()
+	nack   func()
+}
+
+func NewCompletionTracker(ack, nack func()) *CompletionTracker {
+	ct := &CompletionTracker{
+		ack:  ack,
+		nack: nack,
+	}
+
+	ct.failed.Store(false)
+	return ct
+}
+
+func (ct *CompletionTracker) Add(delta int) {
+	ct.wg.Add(delta)
+}
+
+func (ct *CompletionTracker) Done() {
+	ct.wg.Done()
+}
+
+func (ct *CompletionTracker) Fail() {
+	ct.failed.Store(true)
+}
+
+func (ct *CompletionTracker) WaitAndFinish() {
+	ct.wg.Wait()
+	if ct.failed.Load() {
+		if ct.nack != nil {
+			ct.nack()
+		}
+	} else {
+		if ct.ack != nil {
+			ct.ack()
+		}
+	}
 }
 
 func (d *Document[T]) Clone() *Document[T] {
@@ -39,12 +83,6 @@ func (d *Document[T]) Clone() *Document[T] {
 	}
 
 	return &newDoc
-}
-
-func (d *Document[T]) DoAck() {
-	if d != nil && d.Ack != nil {
-		d.Ack()
-	}
 }
 
 type Source[T any] interface {
