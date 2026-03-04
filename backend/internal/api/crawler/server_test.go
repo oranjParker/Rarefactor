@@ -7,22 +7,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
 	"github.com/oranjParker/Rarefactor/internal/core"
 	"github.com/pashagolub/pgxmock/v3"
 )
 
 type mockJetStream struct {
-	nats.JetStreamContext
+	jetstream.JetStream
 	publishedSubject string
 	publishedData    []byte
 }
 
-func (m *mockJetStream) Publish(subj string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error) {
+func (m *mockJetStream) Publish(ctx context.Context, subj string, data []byte, opts ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
 	m.publishedSubject = subj
 	m.publishedData = data
-	return &nats.PubAck{Sequence: 1, Stream: "CRAWL_JOBS"}, nil
+	return &jetstream.PubAck{Sequence: 1, Stream: "CRAWL_JOBS"}, nil
 }
 
 func TestCrawl_Success(t *testing.T) {
@@ -226,9 +226,9 @@ func TestCrawl_NatsFailure_DBUpdateFailure(t *testing.T) {
 }
 
 type mockJetStreamFail struct {
-	nats.JetStreamContext
+	jetstream.JetStream
 }
 
-func (m *mockJetStreamFail) Publish(subj string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error) {
+func (m *mockJetStreamFail) Publish(ctx context.Context, subj string, data []byte, opts ...jetstream.PublishOpt) (*jetstream.PubAck, error) {
 	return nil, fmt.Errorf("nats error")
 }

@@ -6,11 +6,12 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 type NatsConn struct {
 	Conn *nats.Conn
-	JS   nats.JetStreamContext
+	JS   jetstream.JetStream
 }
 
 func NewNatsConnection() (*NatsConn, error) {
@@ -29,7 +30,7 @@ func NewNatsConnection() (*NatsConn, error) {
 		return nil, fmt.Errorf("failed to connect to NATS at %s: %w", url, err)
 	}
 
-	js, err := nc.JetStream()
+	js, err := jetstream.New(nc)
 	if err != nil {
 		nc.Close()
 		return nil, fmt.Errorf("failed to initialize JetStream: %w", err)

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/oranjParker/Rarefactor/internal/core"
 	"github.com/oranjParker/Rarefactor/internal/database"
 	"github.com/oranjParker/Rarefactor/internal/llm_provider"
@@ -119,13 +119,13 @@ func setupWorkerDependencies(ctx context.Context) (*WorkerDependencies, error) {
 				goto retry
 			}
 
-			_, err = nt.JS.AddStream(&nats.StreamConfig{
+			_, err = nt.JS.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 				Name:      "CRAWL_JOBS",
 				Subjects:  []string{"crawl.>"},
-				Retention: nats.WorkQueuePolicy,
+				Retention: jetstream.WorkQueuePolicy,
 				MaxMsgs:   1000000,
 				MaxBytes:  10 * 1024 * 1024 * 1024,
-				Discard:   nats.DiscardOld,
+				Discard:   jetstream.DiscardOld,
 			})
 			if err != nil {
 				log.Printf("Stream setup failed: %v", err)

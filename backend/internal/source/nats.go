@@ -3,23 +3,21 @@ package source
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"sync"
-	"time"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/oranjParker/Rarefactor/internal/core"
 )
 
 type NatsSource struct {
-	JS      nats.JetStreamContext
+	JS      jetstream.JetStream
 	Subject string
 	Queue   string
 }
 
-func NewNatsSource(js nats.JetStreamContext, subject, queue string) *NatsSource {
+func NewNatsSource(js jetstream.JetStream, subject, queue string) *NatsSource {
 	return &NatsSource{
 		JS:      js,
 		Subject: subject,
@@ -30,35 +28,38 @@ func NewNatsSource(js nats.JetStreamContext, subject, queue string) *NatsSource 
 func (n *NatsSource) Stream(ctx context.Context) (<-chan *core.Document[string], error) {
 	out := make(chan *core.Document[string])
 
-	sub, err := n.JS.QueueSubscribeSync(n.Subject, n.Queue, nats.AckExplicit())
+	consumer, err := n.JS.CreateOrUpdateConsumer(ctx, "CRAWL_JOBS", jetstream.ConsumerConfig{
+		Durable:       n.Queue,
+		FilterSubject: n.Subject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("nats subscription failed: %w", err)
+		return nil, fmt.Errorf("nats consumer setup failed: %w", err)
 	}
 
-	if err := sub.SetPendingLimits(100000, 512*1024*1024); err != nil {
-		log.Printf("[NATS Source] Warning: Could not set pending limits: %v", err)
+	iter, err := consumer.Messages()
+	if err != nil {
+		return nil, fmt.Errorf("nats consumer iterator failed: %w", err)
 	}
 
 	go func() {
 		defer close(out)
-		defer sub.Unsubscribe()
+		defer iter.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				msg, err := sub.NextMsg(time.Second)
+				msg, err := iter.Next()
 				if err != nil {
-					if errors.Is(err, nats.ErrTimeout) {
-						continue
-					}
 					log.Printf("[NATS Source] NextMsg error: %v", err)
 					continue
 				}
 
 				var doc core.Document[string]
-				if err := json.Unmarshal(msg.Data, &doc); err != nil {
+				msgData := msg.Data()
+				if err := json.Unmarshal(msgData, &doc); err != nil {
 					log.Printf("[NATS Source] Malformed JSON, Terminating msg: %v", err)
 					msg.Term()
 					continue

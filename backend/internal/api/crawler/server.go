@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	pb "github.com/oranjParker/Rarefactor/generated/protos/v1"
 	"github.com/oranjParker/Rarefactor/internal/core"
 )
@@ -22,7 +22,7 @@ type DBExecutor interface {
 }
 
 type JetStreamPublisher interface {
-	Publish(subj string, data []byte, opts ...nats.PubOpt) (*nats.PubAck, error)
+	Publish(ctx context.Context, subj string, data []byte, opts ...jetstream.PublishOpt) (*jetstream.PubAck, error)
 }
 
 type CrawlerService struct {
@@ -72,7 +72,7 @@ func (s *CrawlerService) Crawl(ctx context.Context, req *pb.CrawlRequest) (*pb.C
 		return nil, fmt.Errorf("failed to marshal job payload: %w", err)
 	}
 
-	if _, err := s.nats.Publish("crawl.jobs", payload); err != nil {
+	if _, err := s.nats.Publish(ctx, "crawl.jobs", payload); err != nil {
 		_, _ = s.db.Exec(ctx, "UPDATE crawl_jobs SET status = 'FAILED' WHERE id = $1", jobID)
 		return nil, fmt.Errorf("failed to queue job: %w", err)
 	}

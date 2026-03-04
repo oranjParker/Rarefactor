@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/oranjParker/Rarefactor/internal/core"
 )
 
 type NatsSink struct {
-	JS      nats.JetStreamContext
+	JS      jetstream.JetStream
 	Subject string
 }
 
-func NewNatsSink(js nats.JetStreamContext, subject string) *NatsSink {
+func NewNatsSink(js jetstream.JetStream, subject string) *NatsSink {
 	return &NatsSink{
 		JS:      js,
 		Subject: subject,
@@ -28,7 +28,7 @@ func (n *NatsSink) Write(ctx context.Context, doc *core.Document[string]) error 
 		return fmt.Errorf("nats marshal failed: %w", err)
 	}
 
-	_, err = n.JS.Publish(n.Subject, data)
+	_, err = n.JS.Publish(ctx, n.Subject, data)
 	if err != nil {
 		return fmt.Errorf("nats publish failed: %w", err)
 	}
